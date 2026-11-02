@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import "./App.css";
 
-const API_URL = "http://127.0.0.1:8000";
+const API_URL = "https://nutritrack-backend-qsoc.onrender.com";
 const USER_ID = 1;
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
