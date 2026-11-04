@@ -2,10 +2,11 @@
 import { useCallback, useEffect, useState } from "react";
 import "./App.css";
 
-const API_URL = "https://nutritrack-backend-qsoc.onrender.com";
-const USER_ID = 1;
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  "https://nutritrack-backend-qsoc.onrender.com";
 
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 const MEALS = ["breakfast", "lunch", "dinner", "snacks"];
 
 const DEFAULT_PROFILE = {
@@ -17,8 +18,14 @@ const DEFAULT_PROFILE = {
   weight_goal: "maintain",
 };
 
+// API HELPER
 async function api(path, options = {}) {
   const headers = { ...options.headers };
+  const token = sessionStorage.getItem("nutritrack_token");
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
 
   if (options.body && !(options.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
@@ -33,8 +40,16 @@ async function api(path, options = {}) {
     });
   } catch {
     throw new Error(
-      "Cannot connect to the API. Make sure the FastAPI server is running."
+      "Cannot connect to the API. Please check your internet connection or API server."
     );
+  }
+
+  // Automatically handle expired or invalid sessions.
+  if (response.status === 401 && path !== "/auth/login" && path !== "/auth/register") {
+    sessionStorage.removeItem("nutritrack_token");
+    sessionStorage.removeItem("nutritrack_user");
+
+    window.dispatchEvent(new Event("nutritrack:unauthorized"));
   }
 
   if (!response.ok) {
@@ -55,9 +70,11 @@ async function api(path, options = {}) {
   }
 
   if (response.status === 204) return null;
+
   return response.json();
 }
 
+// FOOD HELPERS
 function foodShape(food = {}) {
   return {
     ...food,
@@ -108,7 +125,6 @@ function bmiCategory(bmi) {
   return "Obesity range";
 }
 
-// Convert backend activity names into the frontend select values.
 function normalizeActivity(value) {
   const activity = String(value || "moderate")
     .toLowerCase()
@@ -122,7 +138,6 @@ function normalizeActivity(value) {
   return activity;
 }
 
-// Remove duplicate food names while keeping the most complete record.
 function removeDuplicateFoods(items) {
   const uniqueFoods = new Map();
 
@@ -137,7 +152,9 @@ function removeDuplicateFoods(items) {
       food.protein,
       food.carbohydrates,
       food.fat,
-    ].filter((value) => Number.isFinite(value) && value > 0).length;
+    ].filter(
+      (value) => Number.isFinite(value) && value > 0
+    ).length;
 
     const existing = uniqueFoods.get(key);
 
@@ -149,16 +166,54 @@ function removeDuplicateFoods(items) {
     }
   });
 
-  return Array.from(uniqueFoods.values()).map((item) => item.food);
+  return Array.from(uniqueFoods.values()).map(
+    (item) => item.food
+  );
 }
 
 function App() {
+  // AUTHENTICATION
+  // Only restore a user when a token exists.
+  const [currentUser, setCurrentUser] = useState(() => {
+    const token = sessionStorage.getItem("nutritrack_token");
+
+    if (!token) {
+      sessionStorage.removeItem("nutritrack_user");
+      return null;
+    }
+
+    try {
+      return JSON.parse(
+        sessionStorage.getItem("nutritrack_user") || "null"
+      );
+    } catch {
+      sessionStorage.removeItem("nutritrack_token");
+      sessionStorage.removeItem("nutritrack_user");
+      return null;
+    }
+  });
+
+  const [authMode, setAuthMode] = useState("login");
+  const [authLoading, setAuthLoading] = useState(false);
+
+  const [authForm, setAuthForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    age: "30",
+    gender: "male",
+    weight: "80",
+    height: "175",
+    activity_level: "moderate",
+  });
+
   const [dashboard, setDashboard] = useState(null);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
+  // FOOD SEARCH
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -167,24 +222,62 @@ function App() {
   const [quantity, setQuantity] = useState("1");
   const [saving, setSaving] = useState(false);
 
+  // PHOTO ANALYSIS
   const [photo, setPhoto] = useState(null);
   const [preview, setPreview] = useState("");
   const [analysing, setAnalysing] = useState(false);
   const [photoExpanded, setPhotoExpanded] = useState(false);
 
+  // PROFILE
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
 
+  // EXPIRED SESSION HANDLER
+  useEffect(() => {
+    function handleUnauthorized() {
+      sessionStorage.removeItem("nutritrack_token");
+      sessionStorage.removeItem("nutritrack_user");
+
+      setCurrentUser(null);
+      setDashboard(null);
+      setLogs([]);
+      setProfile(DEFAULT_PROFILE);
+      setProfileLoaded(false);
+
+      setLoading(false);
+      setProfileLoading(false);
+
+      setAuthMode("login");
+      setError("Your session has expired. Please log in again.");
+      setMessage("");
+    }
+
+    window.addEventListener(
+      "nutritrack:unauthorized",
+      handleUnauthorized
+    );
+
+    return () => {
+      window.removeEventListener(
+        "nutritrack:unauthorized",
+        handleUnauthorized
+      );
+    };
+  }, []);
+
+  // LOAD DASHBOARD
   const loadDashboard = useCallback(async () => {
+    if (!currentUser?.id) return;
+
     setLoading(true);
     setError("");
 
     try {
       const [dashboardData, diaryData] = await Promise.all([
-        api(`/dashboard/${USER_ID}`),
-        api(`/food-logs/${USER_ID}`),
+        api(`/dashboard/${currentUser.id}`),
+        api(`/food-logs/${currentUser.id}`),
       ]);
 
       setDashboard(dashboardData);
@@ -196,44 +289,73 @@ function App() {
           diaryData?.data ||
           [];
 
-      setLogs(Array.isArray(diaryItems) ? diaryItems : []);
+      setLogs(
+        Array.isArray(diaryItems) ? diaryItems : []
+      );
     } catch (err) {
-      console.error("Could not load dashboard or diary:", err);
-      setError(`Could not load your dashboard or diary: ${err.message}`);
+      console.error(
+        "Could not load dashboard or diary:",
+        err
+      );
+
+      setError(
+        `Could not load your dashboard or diary: ${err.message}`
+      );
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentUser?.id]);
 
+  // LOAD PROFILE
   const loadProfile = useCallback(async () => {
+    if (!currentUser?.id) return;
+
     setProfileLoading(true);
 
     try {
-      const data = await api(`/users/${USER_ID}`);
+      const data = await api(`/users/${currentUser.id}`);
 
       setProfile({
         age: data.age ?? DEFAULT_PROFILE.age,
-        gender: String(data.gender ?? DEFAULT_PROFILE.gender).toLowerCase(),
+        gender: String(
+          data.gender ?? DEFAULT_PROFILE.gender
+        ).toLowerCase(),
         weight: data.weight ?? DEFAULT_PROFILE.weight,
         height: data.height ?? DEFAULT_PROFILE.height,
-        activity_level: normalizeActivity(data.activity_level),
-        weight_goal: data.weight_goal ?? DEFAULT_PROFILE.weight_goal,
+        activity_level: normalizeActivity(
+          data.activity_level
+        ),
+        weight_goal:
+          data.weight_goal ?? DEFAULT_PROFILE.weight_goal,
       });
 
       setProfileLoaded(true);
     } catch (err) {
       console.error("Could not load profile:", err);
-      setError(`Could not load your profile: ${err.message}`);
+
+      setError(
+        `Could not load your profile: ${err.message}`
+      );
     } finally {
       setProfileLoading(false);
     }
-  }, []);
+  }, [currentUser?.id]);
 
+  // LOAD USER DATA AFTER LOGIN
   useEffect(() => {
-    loadDashboard();
-    loadProfile();
-  }, [loadDashboard, loadProfile]);
+    if (
+      currentUser?.id &&
+      sessionStorage.getItem("nutritrack_token")
+    ) {
+      loadDashboard();
+      loadProfile();
+    } else {
+      setLoading(false);
+      setProfileLoading(false);
+    }
+  }, [currentUser?.id, loadDashboard, loadProfile]);
 
+  // CLEAN UP PHOTO PREVIEW
   useEffect(() => {
     return () => {
       if (preview.startsWith("blob:")) {
@@ -242,30 +364,140 @@ function App() {
     };
   }, [preview]);
 
+  // LOGIN / REGISTER
+  async function submitAuth(event) {
+    event.preventDefault();
+
+    setError("");
+    setMessage("");
+    setAuthLoading(true);
+
+    try {
+      const isRegister = authMode === "register";
+
+      const payload = isRegister
+        ? {
+            name: authForm.name.trim(),
+            email: authForm.email.trim(),
+            password: authForm.password,
+            age: Number(authForm.age),
+            gender: authForm.gender,
+            weight: Number(authForm.weight),
+            height: Number(authForm.height),
+            activity_level: authForm.activity_level,
+          }
+        : {
+            email: authForm.email.trim(),
+            password: authForm.password,
+          };
+
+      const result = await api(
+        isRegister ? "/auth/register" : "/auth/login",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (!result?.access_token || !result?.user?.id) {
+        throw new Error(
+          "The server did not return a valid login session."
+        );
+      }
+
+      sessionStorage.setItem(
+        "nutritrack_token",
+        result.access_token
+      );
+
+      sessionStorage.setItem(
+        "nutritrack_user",
+        JSON.stringify(result.user)
+      );
+
+      setCurrentUser(result.user);
+      setDashboard(null);
+      setLogs([]);
+      setProfile(DEFAULT_PROFILE);
+      setProfileLoaded(false);
+
+      setError("");
+      setMessage(
+        isRegister
+          ? "Your account has been created."
+          : "Welcome back!"
+      );
+    } catch (err) {
+      setError(err.message || "Authentication failed.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  // LOGOUT
+  function logout() {
+    sessionStorage.removeItem("nutritrack_token");
+    sessionStorage.removeItem("nutritrack_user");
+
+    setCurrentUser(null);
+    setDashboard(null);
+    setLogs([]);
+    setProfile(DEFAULT_PROFILE);
+    setProfileLoaded(false);
+
+    setLoading(false);
+    setProfileLoading(false);
+
+    setError("");
+    setMessage("");
+    setAuthMode("login");
+  }
+
+  function updateAuthForm(field, value) {
+    setAuthForm((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+  }
+
+  // DASHBOARD VALUES
   const user = dashboard?.user || {};
   const calorieData = dashboard?.calories || {};
 
   const goal = Number(
-    calorieData.goal ?? user.daily_calorie_goal ?? 2000
+    calorieData.goal ??
+      user.daily_calorie_goal ??
+      2000
   );
 
   const consumed = Number(
-    calorieData.consumed ?? dashboard?.consumed_calories ?? 0
+    calorieData.consumed ??
+      dashboard?.consumed_calories ??
+      0
   );
 
   const remaining = Math.max(
     0,
-    Number(calorieData.remaining ?? goal - consumed)
+    Number(
+      calorieData.remaining ?? goal - consumed
+    )
   );
 
   const percent =
-    goal > 0 ? Math.min(100, (consumed / goal) * 100) : 0;
+    goal > 0
+      ? Math.min(100, (consumed / goal) * 100)
+      : 0;
 
   const meals = dashboard?.meals || {};
 
-  const bmi = calculateBMI(profile.weight, profile.height);
+  const bmi = calculateBMI(
+    profile.weight,
+    profile.height
+  );
+
   const currentBmiCategory = bmiCategory(bmi);
 
+  // UPDATE PROFILE FORM
   function updateProfile(field, value) {
     setProfile((previous) => ({
       ...previous,
@@ -273,8 +505,10 @@ function App() {
     }));
   }
 
+  // SAVE PROFILE
   async function saveProfile(event) {
     event.preventDefault();
+
     setError("");
     setMessage("");
 
@@ -293,41 +527,52 @@ function App() {
       height <= 0 ||
       height >= 300
     ) {
-      setError("Please enter a valid age, weight, and height.");
+      setError(
+        "Please enter a valid age, weight, and height."
+      );
       return;
     }
 
     if (
       !["male", "female"].includes(profile.gender) ||
-      !["sedentary", "light", "moderate", "active", "very_active"].includes(
-        profile.activity_level
-      ) ||
-      !["lose", "maintain", "gain"].includes(profile.weight_goal)
+      ![
+        "sedentary",
+        "light",
+        "moderate",
+        "active",
+        "very_active",
+      ].includes(profile.activity_level) ||
+      !["lose", "maintain", "gain"].includes(
+        profile.weight_goal
+      )
     ) {
-      setError("Please check your sex, activity level, and weight goal.");
+      setError(
+        "Please check your sex, activity level, and weight goal."
+      );
       return;
     }
 
     setProfileSaving(true);
 
     try {
-      const updated = await api(`/users/${USER_ID}/profile`, {
-        method: "PUT",
-        body: JSON.stringify({
-          age,
-          gender: profile.gender,
-          weight,
-          height,
-          // Backend accepts "very active", not "very_active".
-          activity_level:
-            profile.activity_level === "very_active"
-              ? "very active"
-              : profile.activity_level,
-          weight_goal: profile.weight_goal,
-        }),
-      });
+      const updated = await api(
+        `/users/${currentUser.id}/profile`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            age,
+            gender: profile.gender,
+            weight,
+            height,
+            activity_level:
+              profile.activity_level === "very_active"
+                ? "very active"
+                : profile.activity_level,
+            weight_goal: profile.weight_goal,
+          }),
+        }
+      );
 
-      // Backend returns { message, user: {...} }.
       const updatedUser = updated.user || updated;
 
       setProfile({
@@ -338,24 +583,31 @@ function App() {
         weight: updatedUser.weight ?? weight,
         height: updatedUser.height ?? height,
         activity_level: normalizeActivity(
-          updatedUser.activity_level ?? profile.activity_level
+          updatedUser.activity_level ??
+            profile.activity_level
         ),
-        weight_goal: updatedUser.weight_goal ?? profile.weight_goal,
+        weight_goal:
+          updatedUser.weight_goal ??
+          profile.weight_goal,
       });
 
       setProfileLoaded(true);
+
       setMessage(
         "Your profile and daily calorie target have been updated."
       );
 
       await loadDashboard();
     } catch (err) {
-      setError(`Could not save your profile: ${err.message}`);
+      setError(
+        `Could not save your profile: ${err.message}`
+      );
     } finally {
       setProfileSaving(false);
     }
   }
 
+  // FOOD SEARCH
   async function searchFood(event) {
     event?.preventDefault();
 
@@ -372,7 +624,9 @@ function App() {
 
     try {
       const data = await api(
-        `/foods/search?name=${encodeURIComponent(query.trim())}`
+        `/foods/search?name=${encodeURIComponent(
+          query.trim()
+        )}`
       );
 
       const list = Array.isArray(data)
@@ -382,12 +636,23 @@ function App() {
           data?.items ||
           (data ? [data] : []);
 
-      const cleanedResults = removeDuplicateFoods(list);
+      const cleanedResults =
+        removeDuplicateFoods(list);
 
       setResults(cleanedResults);
 
       if (!cleanedResults.length) {
-        setMessage("No matching food found. Try another search.");
+        setMessage(
+          "No matching food found. Try another search."
+        );
+      } else if (
+        cleanedResults.some((food) =>
+          food.source?.toLowerCase().includes("gemini")
+        )
+      ) {
+        setMessage(
+          "Gemini generated an estimated nutrition result. Review the serving size and values before adding it."
+        );
       }
     } catch (err) {
       setError(`Search failed: ${err.message}`);
@@ -404,9 +669,13 @@ function App() {
 
     document
       .getElementById("food-search")
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      ?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
   }
 
+  // ADD FOOD TO DIARY
   async function addToDiary(food = selected) {
     if (!food) return;
 
@@ -417,8 +686,13 @@ function App() {
       return;
     }
 
-    if (!Number.isFinite(food.calories) || food.calories <= 0) {
-      setError("The food must have a valid calorie estimate.");
+    if (
+      !Number.isFinite(food.calories) ||
+      food.calories <= 0
+    ) {
+      setError(
+        "The food must have a valid calorie estimate."
+      );
       return;
     }
 
@@ -434,7 +708,8 @@ function App() {
           method: "POST",
           body: JSON.stringify({
             name: food.name,
-            serving_size: food.serving_size || "1 serving",
+            serving_size:
+              food.serving_size || "1 serving",
             calories: food.calories,
             protein: food.protein,
             carbohydrates: food.carbohydrates,
@@ -446,13 +721,15 @@ function App() {
       }
 
       if (id == null) {
-        throw new Error("The API did not return a food ID.");
+        throw new Error(
+          "The API did not return a food ID."
+        );
       }
 
       await api("/food-logs", {
         method: "POST",
         body: JSON.stringify({
-          user_id: USER_ID,
+          user_id: currentUser.id,
           food_id: id,
           meal_type: meal,
           quantity: amount,
@@ -460,6 +737,7 @@ function App() {
       });
 
       setSelected(null);
+
       setMessage(
         `${food.name} added to your diary (${formatNumber(
           food.calories * amount
@@ -474,8 +752,10 @@ function App() {
     }
   }
 
+  // SELECT PHOTO
   function selectPhoto(event) {
     const file = event.target.files?.[0];
+
     if (!file) return;
 
     setError("");
@@ -498,6 +778,7 @@ function App() {
     setPreview(URL.createObjectURL(file));
   }
 
+  // GEMINI PHOTO ANALYSIS
   async function analysePhoto() {
     if (!photo) {
       setError("Choose a food photo first.");
@@ -513,25 +794,35 @@ function App() {
       const formData = new FormData();
       formData.append("image", photo);
 
-      const result = await api("/ai/analyze-food", {
-        method: "POST",
-        body: formData,
-      });
+      const result = await api(
+        "/ai/analyze-food",
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
 
       const item = foodShape(
-        result?.food || result?.result || result?.analysis || result
+        result?.food ||
+          result?.result ||
+          result?.analysis ||
+          result
       );
 
       if (
         !item.name.trim() ||
-        item.name.toLowerCase() === "food not identified"
+        item.name.toLowerCase() ===
+          "food not identified"
       ) {
         throw new Error(
           "The AI could not identify the food. Try a clearer photo."
         );
       }
 
-      if (!Number.isFinite(item.calories) || item.calories <= 0) {
+      if (
+        !Number.isFinite(item.calories) ||
+        item.calories <= 0
+      ) {
         throw new Error(
           "The AI did not return a valid calorie estimate. Please try again."
         );
@@ -552,7 +843,9 @@ function App() {
         "Photo analysed. Review the estimated nutrition before adding it to your diary."
       );
     } catch (err) {
-      setError(`Photo analysis failed: ${err.message}`);
+      setError(
+        `Photo analysis failed: ${err.message}`
+      );
     } finally {
       setAnalysing(false);
     }
@@ -567,6 +860,7 @@ function App() {
     setMessage("");
   }
 
+  // DELETE DIARY ENTRY
   async function deleteLog(log) {
     const id = log.id ?? log.log_id;
 
@@ -575,20 +869,28 @@ function App() {
       return;
     }
 
-    if (!window.confirm("Remove this diary entry?")) return;
+    if (!window.confirm("Remove this diary entry?")) {
+      return;
+    }
 
     setError("");
     setMessage("");
 
     try {
-      await api(`/food-logs/${id}`, { method: "DELETE" });
+      await api(`/food-logs/${id}`, {
+        method: "DELETE",
+      });
+
       setMessage("Diary entry removed.");
       await loadDashboard();
     } catch (err) {
-      setError(`Could not remove entry: ${err.message}`);
+      setError(
+        `Could not remove entry: ${err.message}`
+      );
     }
   }
 
+  // FOOD EMOJI
   function foodEmoji(name = "") {
     const text = name.toLowerCase();
 
@@ -605,6 +907,7 @@ function App() {
     return "🥗";
   }
 
+  // FOOD RESULT CARD
   function FoodCard({ food }) {
     const isAiEstimate =
       food.source?.toLowerCase().includes("gemini") ||
@@ -612,7 +915,9 @@ function App() {
 
     return (
       <article className="food-card">
-        <div className="food-emoji">{foodEmoji(food.name)}</div>
+        <div className="food-emoji">
+          {foodEmoji(food.name)}
+        </div>
 
         <div className="food-info">
           <h3>{food.name}</h3>
@@ -625,7 +930,9 @@ function App() {
           </div>
 
           {isAiEstimate && (
-            <small className="ai-disclaimer">AI nutrition estimate</small>
+            <small className="ai-disclaimer">
+              AI nutrition estimate
+            </small>
           )}
         </div>
 
@@ -645,6 +952,262 @@ function App() {
     );
   }
 
+  // LOGIN / REGISTER PAGE
+  if (!currentUser) {
+    return (
+      <div className="auth-page">
+        <div className="auth-card">
+          <a className="brand auth-brand" href="#auth">
+            <span className="brand-logo">
+              N<span>+</span>
+            </span>
+
+            <span className="brand-name">
+              NUTRITRACK
+              <small>FOOD · FITNESS · YOU</small>
+            </span>
+          </a>
+
+          <span className="section-kicker">
+            YOUR PERSONAL NUTRITION SPACE
+          </span>
+
+          <h1>
+            {authMode === "register"
+              ? "Create your account."
+              : "Welcome back."}
+          </h1>
+
+          <p className="auth-intro">
+            Understand your food. Build healthier habits.
+          </p>
+
+          <div className="auth-tabs">
+            <button
+              type="button"
+              className={
+                authMode === "login"
+                  ? "auth-tab active"
+                  : "auth-tab"
+              }
+              onClick={() => {
+                setAuthMode("login");
+                setError("");
+                setMessage("");
+              }}
+            >
+              Log in
+            </button>
+
+            <button
+              type="button"
+              className={
+                authMode === "register"
+                  ? "auth-tab active"
+                  : "auth-tab"
+              }
+              onClick={() => {
+                setAuthMode("register");
+                setError("");
+                setMessage("");
+              }}
+            >
+              Create account
+            </button>
+          </div>
+
+          {error && (
+            <div
+              className="notice notice-error"
+              role="alert"
+            >
+              <span>!</span>
+              <p>{error}</p>
+            </div>
+          )}
+
+          {message && (
+            <div
+              className="notice notice-success"
+              role="status"
+            >
+              <span>✓</span>
+              <p>{message}</p>
+            </div>
+          )}
+
+          <form
+            className="auth-form"
+            onSubmit={submitAuth}
+          >
+            {authMode === "register" && (
+              <label>
+                Full name
+                <input
+                  value={authForm.name}
+                  onChange={(event) =>
+                    updateAuthForm(
+                      "name",
+                      event.target.value
+                    )
+                  }
+                  required
+                  autoComplete="name"
+                />
+              </label>
+            )}
+
+            <label>
+              Email address
+              <input
+                type="email"
+                value={authForm.email}
+                onChange={(event) =>
+                  updateAuthForm(
+                    "email",
+                    event.target.value
+                  )
+                }
+                required
+                autoComplete="email"
+              />
+            </label>
+
+            <label>
+              Password
+              <input
+                type="password"
+                value={authForm.password}
+                onChange={(event) =>
+                  updateAuthForm(
+                    "password",
+                    event.target.value
+                  )
+                }
+                required
+                minLength="6"
+                autoComplete={
+                  authMode === "register"
+                    ? "new-password"
+                    : "current-password"
+                }
+              />
+            </label>
+
+            {authMode === "register" && (
+              <div className="auth-grid">
+                <label>
+                  Age
+                  <input
+                    type="number"
+                    min="1"
+                    max="119"
+                    value={authForm.age}
+                    onChange={(event) =>
+                      updateAuthForm(
+                        "age",
+                        event.target.value
+                      )
+                    }
+                    required
+                  />
+                </label>
+
+                <label>
+                  Gender
+                  <select
+                    value={authForm.gender}
+                    onChange={(event) =>
+                      updateAuthForm(
+                        "gender",
+                        event.target.value
+                      )
+                    }
+                  >
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </label>
+
+                <label>
+                  Weight (kg)
+                  <input
+                    type="number"
+                    min="1"
+                    max="499"
+                    step="0.1"
+                    value={authForm.weight}
+                    onChange={(event) =>
+                      updateAuthForm(
+                        "weight",
+                        event.target.value
+                      )
+                    }
+                    required
+                  />
+                </label>
+
+                <label>
+                  Height (cm)
+                  <input
+                    type="number"
+                    min="1"
+                    max="299"
+                    step="0.1"
+                    value={authForm.height}
+                    onChange={(event) =>
+                      updateAuthForm(
+                        "height",
+                        event.target.value
+                      )
+                    }
+                    required
+                  />
+                </label>
+
+                <label className="auth-full">
+                  Activity level
+                  <select
+                    value={authForm.activity_level}
+                    onChange={(event) =>
+                      updateAuthForm(
+                        "activity_level",
+                        event.target.value
+                      )
+                    }
+                  >
+                    <option value="sedentary">Sedentary</option>
+                    <option value="light">Light</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="active">Active</option>
+                    <option value="very active">Very active</option>
+                  </select>
+                </label>
+              </div>
+            )}
+
+            <button
+              className="btn-lime auth-submit"
+              type="submit"
+              disabled={authLoading}
+            >
+              {authLoading
+                ? "Please wait..."
+                : authMode === "register"
+                  ? "Create account ↗"
+                  : "Log in ↗"}
+            </button>
+          </form>
+
+          <p className="auth-footnote">
+            Your nutrition data is linked to your account.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // MAIN DASHBOARD
   return (
     <div className="site">
       <div className="ambient ambient-one" />
@@ -655,6 +1218,7 @@ function App() {
           <span className="brand-logo">
             N<span>+</span>
           </span>
+
           <span className="brand-name">
             NUTRITRACK
             <small>FOOD · FITNESS · YOU</small>
@@ -668,16 +1232,33 @@ function App() {
           <a href="#diary">My Diary</a>
         </nav>
 
-        <a className="profile-pill" href="#profile">
-          <span className="profile-dot">
-            {(user.name || "A").charAt(0).toUpperCase()}
-          </span>
-          <span>{user.name || "My Account"}</span>
-          <span className="profile-arrow">⌄</span>
-        </a>
+        <div className="account-actions">
+          <a className="profile-pill" href="#profile">
+            <span className="profile-dot">
+              {(user.name || currentUser.name || "A")
+                .charAt(0)
+                .toUpperCase()}
+            </span>
+
+            <span>
+              {user.name ||
+                currentUser.name ||
+                "My Account"}
+            </span>
+          </a>
+
+          <button
+            className="logout-button"
+            type="button"
+            onClick={logout}
+          >
+            Log out
+          </button>
+        </div>
       </header>
 
       <main className="page">
+        {/* HERO */}
         <section className="hero" id="home">
           <div className="hero-copy">
             <div className="hero-kicker">
@@ -698,6 +1279,7 @@ function App() {
               <a className="btn-lime" href="#profile">
                 Calculate my goals <span>↗</span>
               </a>
+
               <a className="btn-outline" href="#diary">
                 My food diary <span>→</span>
               </a>
@@ -710,9 +1292,12 @@ function App() {
                 <span>🥦</span>
                 <b>+</b>
               </div>
+
               <div>
                 <strong>Better choices, every day</strong>
-                <small>Your personal nutrition journey starts here.</small>
+                <small>
+                  Your personal nutrition journey starts here.
+                </small>
               </div>
             </div>
           </div>
@@ -742,16 +1327,20 @@ function App() {
 
             <div className="floating-card float-calories">
               <span className="float-icon">✳</span>
+
               <div>
                 <small>CONSUMED TODAY</small>
                 <strong>
-                  {loading ? "..." : formatNumber(consumed)} <i>kcal</i>
+                  {loading ? "..." : formatNumber(consumed)}
+                  {" "}
+                  <i>kcal</i>
                 </strong>
               </div>
             </div>
 
             <div className="floating-card float-goal">
               <span className="goal-ring">✓</span>
+
               <div>
                 <small>DAILY CALORIE GOAL</small>
                 <strong>{formatNumber(goal)} kcal</strong>
@@ -759,24 +1348,35 @@ function App() {
             </div>
 
             <div className="hero-stats">
-              <span className="stats-label">YOUR DAILY STATS</span>
+              <span className="stats-label">
+                YOUR DAILY STATS
+              </span>
+
               <div>
                 <small>Consumed</small>
-                <strong>{formatNumber(consumed)} <i>kcal</i></strong>
+                <strong>
+                  {formatNumber(consumed)} <i>kcal</i>
+                </strong>
               </div>
+
               <div>
                 <small>Remaining</small>
                 <strong className="stat-green">
                   {formatNumber(remaining)} <i>kcal</i>
                 </strong>
               </div>
+
               <div>
                 <small>Daily goal</small>
-                <strong>{formatNumber(goal)} <i>kcal</i></strong>
+                <strong>
+                  {formatNumber(goal)} <i>kcal</i>
+                </strong>
               </div>
+
               <div className="hero-progress">
                 <span style={{ width: `${percent}%` }} />
               </div>
+
               <small className="progress-note">
                 {Math.round(percent)}% of your daily goal
               </small>
@@ -792,10 +1392,15 @@ function App() {
           </div>
         </section>
 
+        {/* NOTIFICATIONS */}
         {error && (
-          <div className="notice notice-error" role="alert">
+          <div
+            className="notice notice-error"
+            role="alert"
+          >
             <span>!</span>
             <p>{error}</p>
+
             <button
               onClick={() => setError("")}
               type="button"
@@ -807,9 +1412,13 @@ function App() {
         )}
 
         {message && (
-          <div className="notice notice-success" role="status">
+          <div
+            className="notice notice-success"
+            role="status"
+          >
             <span>✓</span>
             <p>{message}</p>
+
             <button
               onClick={() => setMessage("")}
               type="button"
@@ -820,12 +1429,15 @@ function App() {
           </div>
         )}
 
+        {/* QUICK STATS */}
         <section className="quick-stats">
           <div className="quick-stat">
             <span className="quick-stat-icon lime">◉</span>
             <div>
               <small>CALORIES CONSUMED</small>
-              <strong>{formatNumber(consumed)} <i>kcal</i></strong>
+              <strong>
+                {formatNumber(consumed)} <i>kcal</i>
+              </strong>
               <p>Today's intake</p>
             </div>
           </div>
@@ -834,7 +1446,9 @@ function App() {
             <span className="quick-stat-icon mint">↘</span>
             <div>
               <small>CALORIES REMAINING</small>
-              <strong>{formatNumber(remaining)} <i>kcal</i></strong>
+              <strong>
+                {formatNumber(remaining)} <i>kcal</i>
+              </strong>
               <p>Room for your next meal</p>
             </div>
           </div>
@@ -843,7 +1457,9 @@ function App() {
             <span className="quick-stat-icon blue">◎</span>
             <div>
               <small>DAILY TARGET</small>
-              <strong>{formatNumber(goal)} <i>kcal</i></strong>
+              <strong>
+                {formatNumber(goal)} <i>kcal</i>
+              </strong>
               <p>Your personal goal</p>
             </div>
           </div>
@@ -852,30 +1468,45 @@ function App() {
             <span className="quick-stat-icon peach">♡</span>
             <div>
               <small>GOAL CONSUMED</small>
-              <strong>{Math.round(percent)}<i>%</i></strong>
+              <strong>
+                {Math.round(percent)}<i>%</i>
+              </strong>
               <p>Of your daily target</p>
             </div>
           </div>
         </section>
 
+        {/* BMI AND CALORIE CALCULATOR */}
         <section className="section-panel" id="profile">
           <div className="section-top">
             <div>
-              <span className="section-kicker">YOUR PERSONAL PROFILE</span>
-              <h2>BMI & calorie <span>calculator.</span></h2>
+              <span className="section-kicker">
+                YOUR PERSONAL PROFILE
+              </span>
+
+              <h2>
+                BMI & calorie <span>calculator.</span>
+              </h2>
+
               <p>
-                Update your details to estimate your BMI and daily calorie
-                target.
+                Update your details to estimate your BMI and daily
+                calorie target.
               </p>
             </div>
+
             <span className="section-number">01</span>
           </div>
 
           {profileLoading ? (
-            <p className="empty-state">Loading your profile...</p>
+            <p className="empty-state">
+              Loading your profile...
+            </p>
           ) : (
             <>
-              <form className="profile-form" onSubmit={saveProfile}>
+              <form
+                className="profile-form"
+                onSubmit={saveProfile}
+              >
                 <div className="profile-fields">
                   <label>
                     Age (years)
@@ -940,7 +1571,10 @@ function App() {
                     <select
                       value={profile.activity_level}
                       onChange={(event) =>
-                        updateProfile("activity_level", event.target.value)
+                        updateProfile(
+                          "activity_level",
+                          event.target.value
+                        )
                       }
                       required
                     >
@@ -967,7 +1601,10 @@ function App() {
                     <select
                       value={profile.weight_goal}
                       onChange={(event) =>
-                        updateProfile("weight_goal", event.target.value)
+                        updateProfile(
+                          "weight_goal",
+                          event.target.value
+                        )
                       }
                       required
                     >
@@ -981,7 +1618,9 @@ function App() {
                 <button
                   className="btn-lime"
                   type="submit"
-                  disabled={profileSaving || !profileLoaded}
+                  disabled={
+                    profileSaving || !profileLoaded
+                  }
                 >
                   {profileSaving
                     ? "Saving profile..."
@@ -991,20 +1630,34 @@ function App() {
 
               <div className="profile-results">
                 <article className="profile-result-card">
-                  <span className="section-kicker">YOUR BMI</span>
-                  <strong>{bmi == null ? "—" : bmi.toFixed(1)}</strong>
+                  <span className="section-kicker">
+                    YOUR BMI
+                  </span>
+
+                  <strong>
+                    {bmi == null ? "—" : bmi.toFixed(1)}
+                  </strong>
+
                   <p>{currentBmiCategory}</p>
+
                   <small>
-                    Adult BMI categories are a screening guide, not a diagnosis.
+                    Adult BMI categories are a screening guide,
+                    not a diagnosis.
                   </small>
                 </article>
 
                 <article className="profile-result-card">
-                  <span className="section-kicker">DAILY CALORIE TARGET</span>
+                  <span className="section-kicker">
+                    DAILY CALORIE TARGET
+                  </span>
+
                   <strong>
-                    {formatNumber(user.daily_calorie_goal ?? goal)}
+                    {formatNumber(
+                      user.daily_calorie_goal ?? goal
+                    )}
                     <small> kcal/day</small>
                   </strong>
+
                   <p>
                     Goal:{" "}
                     {profile.weight_goal === "lose"
@@ -1013,39 +1666,60 @@ function App() {
                         ? "Gain weight"
                         : "Maintain weight"}
                   </p>
+
                   <small>
-                    An estimate based on your profile and activity level.
+                    An estimate based on your profile and
+                    activity level.
                   </small>
                 </article>
               </div>
 
               <p className="nutrition-tip">
-                Calorie needs vary between individuals. BMI does not directly
-                measure body fat or overall health. Use these results as
-                estimates, not medical advice.
+                Calorie needs vary between individuals. BMI does
+                not directly measure body fat or overall health.
+                Use these results as estimates, not medical advice.
               </p>
             </>
           )}
         </section>
 
+        {/* FOOD SEARCH */}
         <section className="section-panel" id="food-search">
           <div className="section-top">
             <div>
-              <span className="section-kicker">FIND YOUR NEXT FAVOURITE</span>
-              <h2>What's on your <span>plate?</span></h2>
-              <p>Search Malaysian favourites or upload a meal photo.</p>
+              <span className="section-kicker">
+                FIND YOUR NEXT FAVOURITE
+              </span>
+
+              <h2>
+                What's on your <span>plate?</span>
+              </h2>
+
+              <p>
+                Search Malaysian favourites or any food. Gemini
+                can estimate nutrition when a food is not in our
+                database.
+              </p>
             </div>
+
             <span className="section-number">02</span>
           </div>
 
-          <form className="search-bar" onSubmit={searchFood}>
+          <form
+            className="search-bar"
+            onSubmit={searchFood}
+          >
             <span className="search-icon">⌕</span>
+
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search nasi lemak, ayam goreng, roti canai..."
+              onChange={(event) =>
+                setQuery(event.target.value)
+              }
+              placeholder="Search any food, e.g. chicken chop, nasi kerabu..."
               aria-label="Search food"
             />
+
             <button
               className="btn-lime"
               type="submit"
@@ -1057,17 +1731,21 @@ function App() {
 
           <div className="popular-searches">
             <span>POPULAR</span>
-            {["Nasi lemak", "Ayam goreng", "Nasi ayam", "Roti canai"].map(
-              (term) => (
-                <button
-                  type="button"
-                  key={term}
-                  onClick={() => setQuery(term)}
-                >
-                  {term}
-                </button>
-              )
-            )}
+
+            {[
+              "Nasi lemak",
+              "Ayam goreng",
+              "Nasi ayam",
+              "Roti canai",
+            ].map((term) => (
+              <button
+                type="button"
+                key={term}
+                onClick={() => setQuery(term)}
+              >
+                {term}
+              </button>
+            ))}
           </div>
 
           {results.length > 0 && (
@@ -1076,10 +1754,14 @@ function App() {
                 <h3>Search results</h3>
                 <span>{results.length} found</span>
               </div>
+
               <div className="food-grid">
                 {results.map((food, index) => (
                   <FoodCard
-                    key={foodId(food) ?? `${food.name}-${index}`}
+                    key={
+                      foodId(food) ??
+                      `${food.name}-${index}`
+                    }
                     food={food}
                   />
                 ))}
@@ -1087,7 +1769,7 @@ function App() {
             </div>
           )}
 
-          {/* Compact photo-analysis button */}
+          {/* PHOTO ANALYSIS */}
           {!photoExpanded ? (
             <button
               className="btn-outline photo-compact-button"
@@ -1100,16 +1782,24 @@ function App() {
             <div className="photo-analysis-expanded">
               <div className="photo-upload">
                 <div className="upload-symbol">▧</div>
+
                 <div className="upload-copy">
                   <h3>AI food photo analysis</h3>
+
                   <p>
-                    Upload a meal photo to estimate calories, protein,
-                    carbohydrates, and fat using Google Gemini.
+                    Upload a meal photo to estimate calories,
+                    protein, carbohydrates, and fat using
+                    Google Gemini.
                   </p>
-                  <small>JPG, PNG, or WEBP · Maximum 10 MB</small>
+
+                  <small>
+                    JPG, PNG, or WEBP · Maximum 10 MB
+                  </small>
                 </div>
+
                 <label className="btn-outline upload-label">
                   Choose photo
+
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
@@ -1121,16 +1811,28 @@ function App() {
 
               {preview && (
                 <div className="photo-review">
-                  <img src={preview} alt="Selected food for AI analysis" />
+                  <img
+                    src={preview}
+                    alt="Selected food for AI analysis"
+                  />
+
                   <div>
-                    <strong>{photo?.name || "Selected food photo"}</strong>
+                    <strong>
+                      {photo?.name || "Selected food photo"}
+                    </strong>
+
                     <p>
                       Image size:{" "}
                       {photo
-                        ? (photo.size / 1024 / 1024).toFixed(2)
+                        ? (
+                            photo.size /
+                            1024 /
+                            1024
+                          ).toFixed(2)
                         : "0"}{" "}
                       MB
                     </p>
+
                     <div className="photo-actions">
                       <button
                         className="btn-lime"
@@ -1142,6 +1844,7 @@ function App() {
                           ? "AI is analysing..."
                           : "Analyse photo ↗"}
                       </button>
+
                       <button
                         className="cancel-button"
                         type="button"
@@ -1156,13 +1859,20 @@ function App() {
               )}
 
               {analysing && (
-                <div className="analysis-progress" role="status">
+                <div
+                  className="analysis-progress"
+                  role="status"
+                >
                   <span className="analysis-spinner" />
+
                   <div>
-                    <strong>Analysing your food photo...</strong>
+                    <strong>
+                      Analysing your food photo...
+                    </strong>
+
                     <p>
-                      Google Gemini is analysing your photo. This may take a
-                      few seconds.
+                      Google Gemini is analysing your photo.
+                      This may take a few seconds.
                     </p>
                   </div>
                 </div>
@@ -1179,25 +1889,34 @@ function App() {
             </div>
           )}
 
+          {/* SELECTED FOOD */}
           {selected && (
             <div className="selected-panel">
               <div className="selected-title">
                 <span className="selected-emoji">
                   {foodEmoji(selected.name)}
                 </span>
+
                 <div>
                   <small>
-                    {selected.source?.toLowerCase().includes("gemini") ||
-                    selected.source === "Ollama AI estimate" ||
-                    selected.source === "Ollama Qwen3-VL 4B"
+                    {selected.source
+                      ?.toLowerCase()
+                      .includes("gemini") ||
+                    selected.source ===
+                      "Ollama AI estimate" ||
+                    selected.source ===
+                      "Ollama Qwen3-VL 4B"
                       ? "AI ESTIMATE — PLEASE REVIEW"
                       : "READY TO ADD"}
                   </small>
+
                   <h3>{selected.name}</h3>
+
                   <p>
                     {selected.serving_size} ·{" "}
                     {formatNumber(
-                      selected.calories * (Number(quantity) || 1)
+                      selected.calories *
+                        (Number(quantity) || 1)
                     )}{" "}
                     kcal
                   </p>
@@ -1207,16 +1926,23 @@ function App() {
               <div className="nutrition-breakdown">
                 <div>
                   <span>Calories</span>
-                  <strong>{formatNumber(selected.calories)} kcal</strong>
+                  <strong>
+                    {formatNumber(selected.calories)} kcal
+                  </strong>
                 </div>
+
                 <div>
                   <span>Protein</span>
                   <strong>{selected.protein} g</strong>
                 </div>
+
                 <div>
                   <span>Carbs</span>
-                  <strong>{selected.carbohydrates} g</strong>
+                  <strong>
+                    {selected.carbohydrates} g
+                  </strong>
                 </div>
+
                 <div>
                   <span>Fat</span>
                   <strong>{selected.fat} g</strong>
@@ -1224,19 +1950,25 @@ function App() {
               </div>
 
               {selected.disclaimer && (
-                <p className="ai-disclaimer">{selected.disclaimer}</p>
+                <p className="ai-disclaimer">
+                  {selected.disclaimer}
+                </p>
               )}
 
               <div className="selected-controls">
                 <label>
                   Meal
+
                   <select
                     value={meal}
-                    onChange={(event) => setMeal(event.target.value)}
+                    onChange={(event) =>
+                      setMeal(event.target.value)
+                    }
                   >
                     {MEALS.map((item) => (
                       <option value={item} key={item}>
-                        {item.charAt(0).toUpperCase() + item.slice(1)}
+                        {item.charAt(0).toUpperCase() +
+                          item.slice(1)}
                       </option>
                     ))}
                   </select>
@@ -1244,13 +1976,16 @@ function App() {
 
                 <label>
                   Quantity
+
                   <input
                     type="number"
                     min="0.1"
                     max="100"
                     step="0.5"
                     value={quantity}
-                    onChange={(event) => setQuantity(event.target.value)}
+                    onChange={(event) =>
+                      setQuantity(event.target.value)
+                    }
                   />
                 </label>
 
@@ -1260,7 +1995,9 @@ function App() {
                   onClick={() => addToDiary()}
                   disabled={saving || analysing}
                 >
-                  {saving ? "Adding..." : "Add to diary ↗"}
+                  {saving
+                    ? "Adding..."
+                    : "Add to diary ↗"}
                 </button>
 
                 <button
@@ -1276,13 +2013,23 @@ function App() {
           )}
         </section>
 
+        {/* FOOD DIARY */}
         <section className="section-panel" id="diary">
           <div className="section-top">
             <div>
-              <span className="section-kicker">YOUR DAILY PROGRESS</span>
-              <h2>Your food <span>diary.</span></h2>
-              <p>Every meal is another step towards your goal.</p>
+              <span className="section-kicker">
+                YOUR DAILY PROGRESS
+              </span>
+
+              <h2>
+                Your food <span>diary.</span>
+              </h2>
+
+              <p>
+                Every meal is another step towards your goal.
+              </p>
             </div>
+
             <span className="section-number">03</span>
           </div>
 
@@ -1299,10 +2046,15 @@ function App() {
                         : "✳"}{" "}
                   {item}
                 </span>
+
                 <strong>
                   {formatNumber(
                     meals[item] ??
-                      meals[item === "snacks" ? "snack" : item] ??
+                      meals[
+                        item === "snacks"
+                          ? "snack"
+                          : item
+                      ] ??
                       0
                   )}{" "}
                   <small>kcal</small>
@@ -1312,7 +2064,9 @@ function App() {
           </div>
 
           {loading ? (
-            <p className="empty-state">Loading your diary...</p>
+            <p className="empty-state">
+              Loading your diary...
+            </p>
           ) : logs.length > 0 ? (
             <div className="diary-list">
               {logs.map((log, index) => {
@@ -1322,23 +2076,36 @@ function App() {
                   log.name ||
                   `Food entry ${index + 1}`;
 
-                const logMeal = String(log.meal_type || "snacks");
+                const logMeal = String(
+                  log.meal_type || "snacks"
+                );
 
                 return (
                   <div
                     className="diary-row"
-                    key={log.id ?? log.log_id ?? `${name}-${index}`}
+                    key={
+                      log.id ??
+                      log.log_id ??
+                      `${name}-${index}`
+                    }
                   >
-                    <span className="diary-emoji">{foodEmoji(name)}</span>
+                    <span className="diary-emoji">
+                      {foodEmoji(name)}
+                    </span>
+
                     <div className="diary-info">
                       <strong>{name}</strong>
+
                       <small>
-                        {logMeal} · Quantity {log.quantity ?? 1}
+                        {logMeal} · Quantity{" "}
+                        {log.quantity ?? 1}
                       </small>
                     </div>
+
                     <strong className="diary-kcal">
                       {formatNumber(log.calories ?? 0)} kcal
                     </strong>
+
                     <button
                       className="remove-log"
                       type="button"
@@ -1354,10 +2121,13 @@ function App() {
           ) : (
             <div className="empty-state">
               <span>🥗</span>
+
               <h3>Your food diary starts here.</h3>
+
               <p>
                 Search for a meal to add your first diary entry.
               </p>
+
               <a className="btn-lime" href="#food-search">
                 Find a meal ↗
               </a>
@@ -1365,17 +2135,21 @@ function App() {
           )}
         </section>
 
+        {/* FOOTER */}
         <footer className="footer">
           <a className="brand" href="#home">
             <span className="brand-logo">
               N<span>+</span>
             </span>
+
             <span className="brand-name">
               NUTRITRACK
               <small>FOOD · FITNESS · YOU</small>
             </span>
           </a>
+
           <p>Eat well. Feel well. Live well.</p>
+
           <a href="#home">Back to top ↑</a>
         </footer>
       </main>
