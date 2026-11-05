@@ -6,13 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import inspect, text
 
-from datetime import datetime, timezone, timedelta, date
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import jwt
 import json
 import os
 import re
+import asyncio
 import hashlib
 import hmac
 import secrets
@@ -503,6 +504,165 @@ def find_user(db: Session, user_id: int):
 
 
 # ==========================================
+# GEMINI CONFIGURATION AND RETRY HANDLING
+# ==========================================
+
+GEMINI_MODEL = os.getenv(
+    "GEMINI_MODEL",
+    "gemini-3.5-flash-lite"
+)
+
+GEMINI_API_KEY = os.getenv(
+    "GEMINI_API_KEY",
+    ""
+).strip()
+
+
+def is_temporary_gemini_error(error: Exception) -> bool:
+    """Identify temporary Gemini errors that may succeed on retry."""
+    error_text = str(error).upper()
+
+    temporary_codes = [
+        "503",
+        "UNAVAILABLE",
+        "429",
+        "RESOURCE_EXHAUSTED",
+        "500",
+        "502",
+        "504",
+        "INTERNAL",
+        "TIMEOUT",
+        "TIMED OUT",
+    ]
+
+    return any(code in error_text for code in temporary_codes)
+
+
+def is_gemini_rate_limit_error(error: Exception) -> bool:
+    error_text = str(error).upper()
+
+    return (
+        "429" in error_text
+        or "RESOURCE_EXHAUSTED" in error_text
+    )
+
+
+def is_gemini_unavailable_error(error: Exception) -> bool:
+    error_text = str(error).upper()
+
+    unavailable_codes = [
+        "503",
+        "UNAVAILABLE",
+        "500",
+        "502",
+        "504",
+        "INTERNAL",
+        "TIMEOUT",
+        "TIMED OUT",
+    ]
+
+    return any(code in error_text for code in unavailable_codes)
+
+
+def is_gemini_invalid_key_error(error: Exception) -> bool:
+    error_text = str(error).lower()
+
+    return (
+        "api_key_invalid" in error_text
+        or "invalid api key" in error_text
+        or "api key not valid" in error_text
+    )
+
+
+async def generate_gemini_with_retry(
+    client,
+    model,
+    contents,
+    config,
+    max_attempts=3,
+):
+    """
+    Call Gemini and retry temporary errors.
+
+    Three attempts are made in total.
+    Waits 2 seconds before attempt 2 and 4 seconds before attempt 3.
+    """
+
+    last_error = None
+
+    for attempt in range(max_attempts):
+        try:
+            return await client.aio.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+
+        except Exception as error:
+            last_error = error
+
+            if not is_temporary_gemini_error(error):
+                raise
+
+            if attempt == max_attempts - 1:
+                break
+
+            wait_seconds = 2 ** (attempt + 1)
+
+            print(
+                f"Gemini temporarily unavailable. "
+                f"Retry {attempt + 1}/{max_attempts - 1} "
+                f"in {wait_seconds} seconds. "
+                f"Error: {str(error)}"
+            )
+
+            await asyncio.sleep(wait_seconds)
+
+    raise last_error
+
+
+def raise_gemini_http_error(error: Exception, feature: str):
+    """Convert Gemini errors into useful HTTP responses."""
+
+    print(f"Gemini {feature} error:", str(error))
+
+    if is_gemini_invalid_key_error(error):
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Gemini rejected the API key. "
+                "Check GEMINI_API_KEY in your backend environment variables."
+            )
+        )
+
+    if is_gemini_rate_limit_error(error):
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Gemini API quota or rate limit reached. "
+                "Please try again later."
+            )
+        )
+
+    if is_gemini_unavailable_error(error):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Gemini AI is temporarily busy or unavailable. "
+                "Please wait a few moments and try again."
+            )
+        )
+
+    raise HTTPException(
+        status_code=502,
+        detail=(
+            f"Gemini could not process your {feature}. "
+            "Please try again."
+        )
+    )
+
+
+# ==========================================
 # ROOT AND DATABASE HEALTH DIAGNOSTIC
 # ==========================================
 
@@ -896,8 +1056,6 @@ def get_food_logs(
     require_owner(user_id, current_user)
     find_user(db, user_id)
 
-    # If a date is supplied, use it.
-    # Otherwise, automatically use today's Malaysia date.
     if date:
         try:
             selected_date = datetime.strptime(
@@ -925,7 +1083,6 @@ def get_food_logs(
 
     for log in logs:
 
-        # Ignore logs without a timestamp.
         if not log.created_at:
             continue
 
@@ -933,8 +1090,6 @@ def get_food_logs(
             log.created_at
         )
 
-        # IMPORTANT:
-        # Only show food logs belonging to the selected Malaysia date.
         if malaysia_created_at.date() != selected_date:
             continue
 
@@ -986,7 +1141,6 @@ def delete_food_log(
             detail="Food log not found"
         )
 
-    # Ensure users can only delete their own records.
     require_owner(log.user_id, current_user)
 
     db.delete(log)
@@ -1020,7 +1174,6 @@ def dashboard(
         .all()
     )
 
-    # Only today's food records are included in dashboard calculations.
     today_logs = [
         log for log in logs
         if is_log_on_date(log, today)
@@ -1095,21 +1248,6 @@ def dashboard(
 
 
 # ==========================================
-# AI FOOD ANALYSIS - GOOGLE GEMINI
-# ==========================================
-
-GEMINI_MODEL = os.getenv(
-    "GEMINI_MODEL",
-    "gemini-3.5-flash-lite"
-)
-
-GEMINI_API_KEY = os.getenv(
-    "GEMINI_API_KEY",
-    ""
-).strip()
-
-
-# ==========================================
 # GEMINI TEXT FOOD ESTIMATION
 # ==========================================
 
@@ -1119,7 +1257,10 @@ async def estimate_food_from_text(food_query: str):
     if not GEMINI_API_KEY:
         raise HTTPException(
             status_code=503,
-            detail="Gemini API key is not configured. Add GEMINI_API_KEY to the backend .env file."
+            detail=(
+                "Gemini API key is not configured. "
+                "Add GEMINI_API_KEY to your backend environment variables."
+            )
         )
 
     prompt = f"""You are a nutrition estimation assistant for a calorie tracker used in Malaysia.
@@ -1147,7 +1288,8 @@ Confidence must be between 0 and 1. No markdown or extra text."""
             api_key=GEMINI_API_KEY
         )
 
-        response = await client.aio.models.generate_content(
+        response = await generate_gemini_with_retry(
+            client=client,
             model=GEMINI_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
@@ -1157,30 +1299,7 @@ Confidence must be between 0 and 1. No markdown or extra text."""
         )
 
     except Exception as error:
-
-        error_text = str(error)
-
-        print(
-            "Gemini text food-search error:",
-            error_text
-        )
-
-        if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
-            raise HTTPException(
-                status_code=429,
-                detail="Gemini API quota or rate limit reached. Please try again later."
-            )
-
-        if "API_KEY_INVALID" in error_text or "invalid api key" in error_text.lower():
-            raise HTTPException(
-                status_code=502,
-                detail="Gemini rejected the API key. Check GEMINI_API_KEY in your backend .env file."
-            )
-
-        raise HTTPException(
-            status_code=502,
-            detail="Gemini could not estimate this food. Please try again."
-        )
+        raise_gemini_http_error(error, "text food search")
 
     ai_data = clean_ai_json(
         getattr(response, "text", None) or ""
@@ -1224,7 +1343,10 @@ Confidence must be between 0 and 1. No markdown or extra text."""
     if calories <= 0:
         raise HTTPException(
             status_code=502,
-            detail="Gemini did not return a valid calorie estimate. Please try a more specific food name."
+            detail=(
+                "Gemini did not return a valid calorie estimate. "
+                "Please try a more specific food name."
+            )
         )
 
     confidence = clean_number(
@@ -1243,7 +1365,10 @@ Confidence must be between 0 and 1. No markdown or extra text."""
         "fat": fat,
         "confidence": min(max(confidence, 0), 100),
         "source": f"Google Gemini ({GEMINI_MODEL})",
-        "disclaimer": "AI nutrition estimate for a typical serving. Actual values vary by recipe and portion size.",
+        "disclaimer": (
+            "AI nutrition estimate for a typical serving. "
+            "Actual values vary by recipe and portion size."
+        ),
     }
 
 
@@ -1281,7 +1406,10 @@ async def analyze_food(
     if not GEMINI_API_KEY:
         raise HTTPException(
             status_code=503,
-            detail="Gemini API key is not configured. Add GEMINI_API_KEY to the backend .env file."
+            detail=(
+                "Gemini API key is not configured. "
+                "Add GEMINI_API_KEY to your backend environment variables."
+            )
         )
 
     prompt = """
@@ -1312,7 +1440,8 @@ Do not include markdown or explanations outside the JSON.
             api_key=GEMINI_API_KEY
         )
 
-        response = await client.aio.models.generate_content(
+        response = await generate_gemini_with_retry(
+            client=client,
             model=GEMINI_MODEL,
             contents=[
                 prompt,
@@ -1328,30 +1457,7 @@ Do not include markdown or explanations outside the JSON.
         )
 
     except Exception as error:
-
-        error_text = str(error)
-
-        print(
-            "Gemini API error:",
-            error_text
-        )
-
-        if "API_KEY_INVALID" in error_text or "invalid api key" in error_text.lower():
-            raise HTTPException(
-                status_code=502,
-                detail="Gemini rejected the API key. Check GEMINI_API_KEY in your .env file."
-            )
-
-        if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
-            raise HTTPException(
-                status_code=429,
-                detail="Gemini API quota or rate limit reached. Please try again later."
-            )
-
-        raise HTTPException(
-            status_code=502,
-            detail="Gemini could not analyse this image. Please try again with a clearer photo."
-        )
+        raise_gemini_http_error(error, "image analysis")
 
     raw_response = getattr(
         response,
@@ -1370,7 +1476,10 @@ Do not include markdown or explanations outside the JSON.
     if not ai_data:
         raise HTTPException(
             status_code=502,
-            detail="The Gemini response could not be read as nutrition data. Please try again."
+            detail=(
+                "The Gemini response could not be read as nutrition data. "
+                "Please try again."
+            )
         )
 
     food_name = ai_data.get(

@@ -2,11 +2,9 @@
 import { useCallback, useEffect, useState } from "react";
 import "./App.css";
 
-const API_URL =
-  import.meta.env.VITE_API_URL ||
-  "https://nutritrack-backend-qsoc.onrender.com";
-
+const API_URL = import.meta.env.VITE_API_URL || "https://nutritrack-backend-qsoc.onrender.com";
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+
 const MEALS = ["breakfast", "lunch", "dinner", "snacks"];
 
 const DEFAULT_PROFILE = {
@@ -18,14 +16,10 @@ const DEFAULT_PROFILE = {
   weight_goal: "maintain",
 };
 
-// API HELPER
 async function api(path, options = {}) {
   const headers = { ...options.headers };
   const token = sessionStorage.getItem("nutritrack_token");
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
+  if (token) headers.Authorization = `Bearer ${token}`;
 
   if (options.body && !(options.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
@@ -40,16 +34,8 @@ async function api(path, options = {}) {
     });
   } catch {
     throw new Error(
-      "Cannot connect to the API. Please check your internet connection or API server."
+      "Cannot connect to the API. Make sure the FastAPI server is running."
     );
-  }
-
-  // Automatically handle expired or invalid sessions.
-  if (response.status === 401 && path !== "/auth/login" && path !== "/auth/register") {
-    sessionStorage.removeItem("nutritrack_token");
-    sessionStorage.removeItem("nutritrack_user");
-
-    window.dispatchEvent(new Event("nutritrack:unauthorized"));
   }
 
   if (!response.ok) {
@@ -70,11 +56,9 @@ async function api(path, options = {}) {
   }
 
   if (response.status === 204) return null;
-
   return response.json();
 }
 
-// FOOD HELPERS
 function foodShape(food = {}) {
   return {
     ...food,
@@ -125,6 +109,7 @@ function bmiCategory(bmi) {
   return "Obesity range";
 }
 
+// Convert backend activity names into the frontend select values.
 function normalizeActivity(value) {
   const activity = String(value || "moderate")
     .toLowerCase()
@@ -138,6 +123,7 @@ function normalizeActivity(value) {
   return activity;
 }
 
+// Remove duplicate food names while keeping the most complete record.
 function removeDuplicateFoods(items) {
   const uniqueFoods = new Map();
 
@@ -152,9 +138,7 @@ function removeDuplicateFoods(items) {
       food.protein,
       food.carbohydrates,
       food.fat,
-    ].filter(
-      (value) => Number.isFinite(value) && value > 0
-    ).length;
+    ].filter((value) => Number.isFinite(value) && value > 0).length;
 
     const existing = uniqueFoods.get(key);
 
@@ -166,36 +150,19 @@ function removeDuplicateFoods(items) {
     }
   });
 
-  return Array.from(uniqueFoods.values()).map(
-    (item) => item.food
-  );
+  return Array.from(uniqueFoods.values()).map((item) => item.food);
 }
 
 function App() {
-  // AUTHENTICATION
-  // Only restore a user when a token exists.
   const [currentUser, setCurrentUser] = useState(() => {
-    const token = sessionStorage.getItem("nutritrack_token");
-
-    if (!token) {
-      sessionStorage.removeItem("nutritrack_user");
-      return null;
-    }
-
     try {
-      return JSON.parse(
-        sessionStorage.getItem("nutritrack_user") || "null"
-      );
+      return JSON.parse(sessionStorage.getItem("nutritrack_user") || "null");
     } catch {
-      sessionStorage.removeItem("nutritrack_token");
-      sessionStorage.removeItem("nutritrack_user");
       return null;
     }
   });
-
   const [authMode, setAuthMode] = useState("login");
   const [authLoading, setAuthLoading] = useState(false);
-
   const [authForm, setAuthForm] = useState({
     name: "",
     email: "",
@@ -206,14 +173,12 @@ function App() {
     height: "175",
     activity_level: "moderate",
   });
-
   const [dashboard, setDashboard] = useState(null);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  // FOOD SEARCH
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -222,55 +187,17 @@ function App() {
   const [quantity, setQuantity] = useState("1");
   const [saving, setSaving] = useState(false);
 
-  // PHOTO ANALYSIS
   const [photo, setPhoto] = useState(null);
   const [preview, setPreview] = useState("");
   const [analysing, setAnalysing] = useState(false);
   const [photoExpanded, setPhotoExpanded] = useState(false);
 
-  // PROFILE
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
 
-  // EXPIRED SESSION HANDLER
-  useEffect(() => {
-    function handleUnauthorized() {
-      sessionStorage.removeItem("nutritrack_token");
-      sessionStorage.removeItem("nutritrack_user");
-
-      setCurrentUser(null);
-      setDashboard(null);
-      setLogs([]);
-      setProfile(DEFAULT_PROFILE);
-      setProfileLoaded(false);
-
-      setLoading(false);
-      setProfileLoading(false);
-
-      setAuthMode("login");
-      setError("Your session has expired. Please log in again.");
-      setMessage("");
-    }
-
-    window.addEventListener(
-      "nutritrack:unauthorized",
-      handleUnauthorized
-    );
-
-    return () => {
-      window.removeEventListener(
-        "nutritrack:unauthorized",
-        handleUnauthorized
-      );
-    };
-  }, []);
-
-  // LOAD DASHBOARD
   const loadDashboard = useCallback(async () => {
-    if (!currentUser?.id) return;
-
     setLoading(true);
     setError("");
 
@@ -289,27 +216,16 @@ function App() {
           diaryData?.data ||
           [];
 
-      setLogs(
-        Array.isArray(diaryItems) ? diaryItems : []
-      );
+      setLogs(Array.isArray(diaryItems) ? diaryItems : []);
     } catch (err) {
-      console.error(
-        "Could not load dashboard or diary:",
-        err
-      );
-
-      setError(
-        `Could not load your dashboard or diary: ${err.message}`
-      );
+      console.error("Could not load dashboard or diary:", err);
+      setError(`Could not load your dashboard or diary: ${err.message}`);
     } finally {
       setLoading(false);
     }
   }, [currentUser?.id]);
 
-  // LOAD PROFILE
   const loadProfile = useCallback(async () => {
-    if (!currentUser?.id) return;
-
     setProfileLoading(true);
 
     try {
@@ -317,36 +233,24 @@ function App() {
 
       setProfile({
         age: data.age ?? DEFAULT_PROFILE.age,
-        gender: String(
-          data.gender ?? DEFAULT_PROFILE.gender
-        ).toLowerCase(),
+        gender: String(data.gender ?? DEFAULT_PROFILE.gender).toLowerCase(),
         weight: data.weight ?? DEFAULT_PROFILE.weight,
         height: data.height ?? DEFAULT_PROFILE.height,
-        activity_level: normalizeActivity(
-          data.activity_level
-        ),
-        weight_goal:
-          data.weight_goal ?? DEFAULT_PROFILE.weight_goal,
+        activity_level: normalizeActivity(data.activity_level),
+        weight_goal: data.weight_goal ?? DEFAULT_PROFILE.weight_goal,
       });
 
       setProfileLoaded(true);
     } catch (err) {
       console.error("Could not load profile:", err);
-
-      setError(
-        `Could not load your profile: ${err.message}`
-      );
+      setError(`Could not load your profile: ${err.message}`);
     } finally {
       setProfileLoading(false);
     }
   }, [currentUser?.id]);
 
-  // LOAD USER DATA AFTER LOGIN
   useEffect(() => {
-    if (
-      currentUser?.id &&
-      sessionStorage.getItem("nutritrack_token")
-    ) {
+    if (currentUser?.id && sessionStorage.getItem("nutritrack_token")) {
       loadDashboard();
       loadProfile();
     } else {
@@ -355,7 +259,6 @@ function App() {
     }
   }, [currentUser?.id, loadDashboard, loadProfile]);
 
-  // CLEAN UP PHOTO PREVIEW
   useEffect(() => {
     return () => {
       if (preview.startsWith("blob:")) {
@@ -364,17 +267,14 @@ function App() {
     };
   }, [preview]);
 
-  // LOGIN / REGISTER
   async function submitAuth(event) {
     event.preventDefault();
-
     setError("");
     setMessage("");
     setAuthLoading(true);
 
     try {
       const isRegister = authMode === "register";
-
       const payload = isRegister
         ? {
             name: authForm.name.trim(),
@@ -393,40 +293,22 @@ function App() {
 
       const result = await api(
         isRegister ? "/auth/register" : "/auth/login",
-        {
-          method: "POST",
-          body: JSON.stringify(payload),
-        }
+        { method: "POST", body: JSON.stringify(payload) }
       );
 
       if (!result?.access_token || !result?.user?.id) {
-        throw new Error(
-          "The server did not return a valid login session."
-        );
+        throw new Error("The server did not return a valid login session.");
       }
 
-      sessionStorage.setItem(
-        "nutritrack_token",
-        result.access_token
-      );
-
-      sessionStorage.setItem(
-        "nutritrack_user",
-        JSON.stringify(result.user)
-      );
-
+      sessionStorage.setItem("nutritrack_token", result.access_token);
+      sessionStorage.setItem("nutritrack_user", JSON.stringify(result.user));
       setCurrentUser(result.user);
       setDashboard(null);
       setLogs([]);
       setProfile(DEFAULT_PROFILE);
       setProfileLoaded(false);
-
       setError("");
-      setMessage(
-        isRegister
-          ? "Your account has been created."
-          : "Welcome back!"
-      );
+      setMessage(isRegister ? "Your account has been created." : "Welcome back!");
     } catch (err) {
       setError(err.message || "Authentication failed.");
     } finally {
@@ -434,70 +316,49 @@ function App() {
     }
   }
 
-  // LOGOUT
   function logout() {
     sessionStorage.removeItem("nutritrack_token");
     sessionStorage.removeItem("nutritrack_user");
-
     setCurrentUser(null);
     setDashboard(null);
     setLogs([]);
     setProfile(DEFAULT_PROFILE);
     setProfileLoaded(false);
-
     setLoading(false);
     setProfileLoading(false);
-
     setError("");
     setMessage("");
     setAuthMode("login");
   }
 
   function updateAuthForm(field, value) {
-    setAuthForm((previous) => ({
-      ...previous,
-      [field]: value,
-    }));
+    setAuthForm((previous) => ({ ...previous, [field]: value }));
   }
 
-  // DASHBOARD VALUES
   const user = dashboard?.user || {};
   const calorieData = dashboard?.calories || {};
 
   const goal = Number(
-    calorieData.goal ??
-      user.daily_calorie_goal ??
-      2000
+    calorieData.goal ?? user.daily_calorie_goal ?? 2000
   );
 
   const consumed = Number(
-    calorieData.consumed ??
-      dashboard?.consumed_calories ??
-      0
+    calorieData.consumed ?? dashboard?.consumed_calories ?? 0
   );
 
   const remaining = Math.max(
     0,
-    Number(
-      calorieData.remaining ?? goal - consumed
-    )
+    Number(calorieData.remaining ?? goal - consumed)
   );
 
   const percent =
-    goal > 0
-      ? Math.min(100, (consumed / goal) * 100)
-      : 0;
+    goal > 0 ? Math.min(100, (consumed / goal) * 100) : 0;
 
   const meals = dashboard?.meals || {};
 
-  const bmi = calculateBMI(
-    profile.weight,
-    profile.height
-  );
-
+  const bmi = calculateBMI(profile.weight, profile.height);
   const currentBmiCategory = bmiCategory(bmi);
 
-  // UPDATE PROFILE FORM
   function updateProfile(field, value) {
     setProfile((previous) => ({
       ...previous,
@@ -505,10 +366,8 @@ function App() {
     }));
   }
 
-  // SAVE PROFILE
   async function saveProfile(event) {
     event.preventDefault();
-
     setError("");
     setMessage("");
 
@@ -527,52 +386,41 @@ function App() {
       height <= 0 ||
       height >= 300
     ) {
-      setError(
-        "Please enter a valid age, weight, and height."
-      );
+      setError("Please enter a valid age, weight, and height.");
       return;
     }
 
     if (
       !["male", "female"].includes(profile.gender) ||
-      ![
-        "sedentary",
-        "light",
-        "moderate",
-        "active",
-        "very_active",
-      ].includes(profile.activity_level) ||
-      !["lose", "maintain", "gain"].includes(
-        profile.weight_goal
-      )
+      !["sedentary", "light", "moderate", "active", "very_active"].includes(
+        profile.activity_level
+      ) ||
+      !["lose", "maintain", "gain"].includes(profile.weight_goal)
     ) {
-      setError(
-        "Please check your sex, activity level, and weight goal."
-      );
+      setError("Please check your sex, activity level, and weight goal.");
       return;
     }
 
     setProfileSaving(true);
 
     try {
-      const updated = await api(
-        `/users/${currentUser.id}/profile`,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            age,
-            gender: profile.gender,
-            weight,
-            height,
-            activity_level:
-              profile.activity_level === "very_active"
-                ? "very active"
-                : profile.activity_level,
-            weight_goal: profile.weight_goal,
-          }),
-        }
-      );
+      const updated = await api(`/users/${currentUser.id}/profile`, {
+        method: "PUT",
+        body: JSON.stringify({
+          age,
+          gender: profile.gender,
+          weight,
+          height,
+          // Backend accepts "very active", not "very_active".
+          activity_level:
+            profile.activity_level === "very_active"
+              ? "very active"
+              : profile.activity_level,
+          weight_goal: profile.weight_goal,
+        }),
+      });
 
+      // Backend returns { message, user: {...} }.
       const updatedUser = updated.user || updated;
 
       setProfile({
@@ -583,31 +431,24 @@ function App() {
         weight: updatedUser.weight ?? weight,
         height: updatedUser.height ?? height,
         activity_level: normalizeActivity(
-          updatedUser.activity_level ??
-            profile.activity_level
+          updatedUser.activity_level ?? profile.activity_level
         ),
-        weight_goal:
-          updatedUser.weight_goal ??
-          profile.weight_goal,
+        weight_goal: updatedUser.weight_goal ?? profile.weight_goal,
       });
 
       setProfileLoaded(true);
-
       setMessage(
         "Your profile and daily calorie target have been updated."
       );
 
       await loadDashboard();
     } catch (err) {
-      setError(
-        `Could not save your profile: ${err.message}`
-      );
+      setError(`Could not save your profile: ${err.message}`);
     } finally {
       setProfileSaving(false);
     }
   }
 
-  // FOOD SEARCH
   async function searchFood(event) {
     event?.preventDefault();
 
@@ -624,9 +465,7 @@ function App() {
 
     try {
       const data = await api(
-        `/foods/search?name=${encodeURIComponent(
-          query.trim()
-        )}`
+        `/foods/search?name=${encodeURIComponent(query.trim())}`
       );
 
       const list = Array.isArray(data)
@@ -636,23 +475,14 @@ function App() {
           data?.items ||
           (data ? [data] : []);
 
-      const cleanedResults =
-        removeDuplicateFoods(list);
+      const cleanedResults = removeDuplicateFoods(list);
 
       setResults(cleanedResults);
 
       if (!cleanedResults.length) {
-        setMessage(
-          "No matching food found. Try another search."
-        );
-      } else if (
-        cleanedResults.some((food) =>
-          food.source?.toLowerCase().includes("gemini")
-        )
-      ) {
-        setMessage(
-          "Gemini generated an estimated nutrition result. Review the serving size and values before adding it."
-        );
+        setMessage("No matching food found. Try another search.");
+      } else if (cleanedResults.some((food) => food.source?.toLowerCase().includes("gemini"))) {
+        setMessage("Gemini generated an estimated nutrition result. Review the serving size and values before adding it.");
       }
     } catch (err) {
       setError(`Search failed: ${err.message}`);
@@ -669,13 +499,9 @@ function App() {
 
     document
       .getElementById("food-search")
-      ?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  // ADD FOOD TO DIARY
   async function addToDiary(food = selected) {
     if (!food) return;
 
@@ -686,13 +512,8 @@ function App() {
       return;
     }
 
-    if (
-      !Number.isFinite(food.calories) ||
-      food.calories <= 0
-    ) {
-      setError(
-        "The food must have a valid calorie estimate."
-      );
+    if (!Number.isFinite(food.calories) || food.calories <= 0) {
+      setError("The food must have a valid calorie estimate.");
       return;
     }
 
@@ -708,8 +529,7 @@ function App() {
           method: "POST",
           body: JSON.stringify({
             name: food.name,
-            serving_size:
-              food.serving_size || "1 serving",
+            serving_size: food.serving_size || "1 serving",
             calories: food.calories,
             protein: food.protein,
             carbohydrates: food.carbohydrates,
@@ -721,9 +541,7 @@ function App() {
       }
 
       if (id == null) {
-        throw new Error(
-          "The API did not return a food ID."
-        );
+        throw new Error("The API did not return a food ID.");
       }
 
       await api("/food-logs", {
@@ -737,7 +555,6 @@ function App() {
       });
 
       setSelected(null);
-
       setMessage(
         `${food.name} added to your diary (${formatNumber(
           food.calories * amount
@@ -752,10 +569,8 @@ function App() {
     }
   }
 
-  // SELECT PHOTO
   function selectPhoto(event) {
     const file = event.target.files?.[0];
-
     if (!file) return;
 
     setError("");
@@ -778,7 +593,6 @@ function App() {
     setPreview(URL.createObjectURL(file));
   }
 
-  // GEMINI PHOTO ANALYSIS
   async function analysePhoto() {
     if (!photo) {
       setError("Choose a food photo first.");
@@ -794,35 +608,25 @@ function App() {
       const formData = new FormData();
       formData.append("image", photo);
 
-      const result = await api(
-        "/ai/analyze-food",
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
+      const result = await api("/ai/analyze-food", {
+        method: "POST",
+        body: formData,
+      });
 
       const item = foodShape(
-        result?.food ||
-          result?.result ||
-          result?.analysis ||
-          result
+        result?.food || result?.result || result?.analysis || result
       );
 
       if (
         !item.name.trim() ||
-        item.name.toLowerCase() ===
-          "food not identified"
+        item.name.toLowerCase() === "food not identified"
       ) {
         throw new Error(
           "The AI could not identify the food. Try a clearer photo."
         );
       }
 
-      if (
-        !Number.isFinite(item.calories) ||
-        item.calories <= 0
-      ) {
+      if (!Number.isFinite(item.calories) || item.calories <= 0) {
         throw new Error(
           "The AI did not return a valid calorie estimate. Please try again."
         );
@@ -843,9 +647,7 @@ function App() {
         "Photo analysed. Review the estimated nutrition before adding it to your diary."
       );
     } catch (err) {
-      setError(
-        `Photo analysis failed: ${err.message}`
-      );
+      setError(`Photo analysis failed: ${err.message}`);
     } finally {
       setAnalysing(false);
     }
@@ -860,7 +662,6 @@ function App() {
     setMessage("");
   }
 
-  // DELETE DIARY ENTRY
   async function deleteLog(log) {
     const id = log.id ?? log.log_id;
 
@@ -869,28 +670,20 @@ function App() {
       return;
     }
 
-    if (!window.confirm("Remove this diary entry?")) {
-      return;
-    }
+    if (!window.confirm("Remove this diary entry?")) return;
 
     setError("");
     setMessage("");
 
     try {
-      await api(`/food-logs/${id}`, {
-        method: "DELETE",
-      });
-
+      await api(`/food-logs/${id}`, { method: "DELETE" });
       setMessage("Diary entry removed.");
       await loadDashboard();
     } catch (err) {
-      setError(
-        `Could not remove entry: ${err.message}`
-      );
+      setError(`Could not remove entry: ${err.message}`);
     }
   }
 
-  // FOOD EMOJI
   function foodEmoji(name = "") {
     const text = name.toLowerCase();
 
@@ -907,7 +700,6 @@ function App() {
     return "🥗";
   }
 
-  // FOOD RESULT CARD
   function FoodCard({ food }) {
     const isAiEstimate =
       food.source?.toLowerCase().includes("gemini") ||
@@ -915,9 +707,7 @@ function App() {
 
     return (
       <article className="food-card">
-        <div className="food-emoji">
-          {foodEmoji(food.name)}
-        </div>
+        <div className="food-emoji">{foodEmoji(food.name)}</div>
 
         <div className="food-info">
           <h3>{food.name}</h3>
@@ -930,9 +720,7 @@ function App() {
           </div>
 
           {isAiEstimate && (
-            <small className="ai-disclaimer">
-              AI nutrition estimate
-            </small>
+            <small className="ai-disclaimer">AI nutrition estimate</small>
           )}
         </div>
 
@@ -952,1207 +740,152 @@ function App() {
     );
   }
 
-  // LOGIN / REGISTER PAGE
   if (!currentUser) {
     return (
       <div className="auth-page">
         <div className="auth-card">
           <a className="brand auth-brand" href="#auth">
-            <span className="brand-logo">
-              N<span>+</span>
-            </span>
-
-            <span className="brand-name">
-              NUTRITRACK
-              <small>FOOD · FITNESS · YOU</small>
-            </span>
+            <span className="brand-logo">N<span>+</span></span>
+            <span className="brand-name">NUTRITRACK<small>FOOD · FITNESS · YOU</small></span>
           </a>
-
-          <span className="section-kicker">
-            YOUR PERSONAL NUTRITION SPACE
-          </span>
-
-          <h1>
-            {authMode === "register"
-              ? "Create your account."
-              : "Welcome back."}
-          </h1>
-
-          <p className="auth-intro">
-            Understand your food. Build healthier habits.
-          </p>
-
+          <span className="section-kicker">YOUR PERSONAL NUTRITION SPACE</span>
+          <h1>{authMode === "register" ? "Create your account." : "Welcome back."}</h1>
+          <p className="auth-intro">Understand your food. Build healthier habits.</p>
           <div className="auth-tabs">
-            <button
-              type="button"
-              className={
-                authMode === "login"
-                  ? "auth-tab active"
-                  : "auth-tab"
-              }
-              onClick={() => {
-                setAuthMode("login");
-                setError("");
-                setMessage("");
-              }}
-            >
-              Log in
-            </button>
-
-            <button
-              type="button"
-              className={
-                authMode === "register"
-                  ? "auth-tab active"
-                  : "auth-tab"
-              }
-              onClick={() => {
-                setAuthMode("register");
-                setError("");
-                setMessage("");
-              }}
-            >
-              Create account
-            </button>
+            <button type="button" className={authMode === "login" ? "auth-tab active" : "auth-tab"} onClick={() => { setAuthMode("login"); setError(""); }}>Log in</button>
+            <button type="button" className={authMode === "register" ? "auth-tab active" : "auth-tab"} onClick={() => { setAuthMode("register"); setError(""); }}>Create account</button>
           </div>
-
-          {error && (
-            <div
-              className="notice notice-error"
-              role="alert"
-            >
-              <span>!</span>
-              <p>{error}</p>
-            </div>
-          )}
-
-          {message && (
-            <div
-              className="notice notice-success"
-              role="status"
-            >
-              <span>✓</span>
-              <p>{message}</p>
-            </div>
-          )}
-
-          <form
-            className="auth-form"
-            onSubmit={submitAuth}
-          >
-            {authMode === "register" && (
-              <label>
-                Full name
-                <input
-                  value={authForm.name}
-                  onChange={(event) =>
-                    updateAuthForm(
-                      "name",
-                      event.target.value
-                    )
-                  }
-                  required
-                  autoComplete="name"
-                />
-              </label>
-            )}
-
-            <label>
-              Email address
-              <input
-                type="email"
-                value={authForm.email}
-                onChange={(event) =>
-                  updateAuthForm(
-                    "email",
-                    event.target.value
-                  )
-                }
-                required
-                autoComplete="email"
-              />
-            </label>
-
-            <label>
-              Password
-              <input
-                type="password"
-                value={authForm.password}
-                onChange={(event) =>
-                  updateAuthForm(
-                    "password",
-                    event.target.value
-                  )
-                }
-                required
-                minLength="6"
-                autoComplete={
-                  authMode === "register"
-                    ? "new-password"
-                    : "current-password"
-                }
-              />
-            </label>
-
-            {authMode === "register" && (
+          {error && <div className="notice notice-error" role="alert"><span>!</span><p>{error}</p></div>}
+          <form className="auth-form" onSubmit={submitAuth}>
+            {authMode === "register" && <>
+              <label>Full name<input value={authForm.name} onChange={e => updateAuthForm("name", e.target.value)} required autoComplete="name" /></label>
+            </>}
+            <label>Email address<input type="email" value={authForm.email} onChange={e => updateAuthForm("email", e.target.value)} required autoComplete="email" /></label>
+            <label>Password<input type="password" value={authForm.password} onChange={e => updateAuthForm("password", e.target.value)} required minLength="6" autoComplete={authMode === "register" ? "new-password" : "current-password"} /></label>
+            {authMode === "register" && <>
               <div className="auth-grid">
-                <label>
-                  Age
-                  <input
-                    type="number"
-                    min="1"
-                    max="119"
-                    value={authForm.age}
-                    onChange={(event) =>
-                      updateAuthForm(
-                        "age",
-                        event.target.value
-                      )
-                    }
-                    required
-                  />
-                </label>
-
-                <label>
-                  Gender
-                  <select
-                    value={authForm.gender}
-                    onChange={(event) =>
-                      updateAuthForm(
-                        "gender",
-                        event.target.value
-                      )
-                    }
-                  >
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                  </select>
-                </label>
-
-                <label>
-                  Weight (kg)
-                  <input
-                    type="number"
-                    min="1"
-                    max="499"
-                    step="0.1"
-                    value={authForm.weight}
-                    onChange={(event) =>
-                      updateAuthForm(
-                        "weight",
-                        event.target.value
-                      )
-                    }
-                    required
-                  />
-                </label>
-
-                <label>
-                  Height (cm)
-                  <input
-                    type="number"
-                    min="1"
-                    max="299"
-                    step="0.1"
-                    value={authForm.height}
-                    onChange={(event) =>
-                      updateAuthForm(
-                        "height",
-                        event.target.value
-                      )
-                    }
-                    required
-                  />
-                </label>
-
-                <label className="auth-full">
-                  Activity level
-                  <select
-                    value={authForm.activity_level}
-                    onChange={(event) =>
-                      updateAuthForm(
-                        "activity_level",
-                        event.target.value
-                      )
-                    }
-                  >
-                    <option value="sedentary">Sedentary</option>
-                    <option value="light">Light</option>
-                    <option value="moderate">Moderate</option>
-                    <option value="active">Active</option>
-                    <option value="very active">Very active</option>
-                  </select>
-                </label>
+                <label>Age<input type="number" min="1" max="119" value={authForm.age} onChange={e => updateAuthForm("age", e.target.value)} required /></label>
+                <label>Gender<select value={authForm.gender} onChange={e => updateAuthForm("gender", e.target.value)}><option value="male">Male</option><option value="female">Female</option></select></label>
+                <label>Weight (kg)<input type="number" min="1" max="499" step="0.1" value={authForm.weight} onChange={e => updateAuthForm("weight", e.target.value)} required /></label>
+                <label>Height (cm)<input type="number" min="1" max="299" step="0.1" value={authForm.height} onChange={e => updateAuthForm("height", e.target.value)} required /></label>
+                <label className="auth-full">Activity level<select value={authForm.activity_level} onChange={e => updateAuthForm("activity_level", e.target.value)}><option value="sedentary">Sedentary</option><option value="light">Light</option><option value="moderate">Moderate</option><option value="active">Active</option><option value="very active">Very active</option></select></label>
               </div>
-            )}
-
-            <button
-              className="btn-lime auth-submit"
-              type="submit"
-              disabled={authLoading}
-            >
-              {authLoading
-                ? "Please wait..."
-                : authMode === "register"
-                  ? "Create account ↗"
-                  : "Log in ↗"}
-            </button>
+            </>}
+            <button className="btn-lime auth-submit" type="submit" disabled={authLoading}>{authLoading ? "Please wait..." : authMode === "register" ? "Create account ↗" : "Log in ↗"}</button>
           </form>
-
-          <p className="auth-footnote">
-            Your nutrition data is linked to your account.
-          </p>
+          <p className="auth-footnote">Your nutrition data is linked to your account.</p>
         </div>
       </div>
     );
   }
 
-  // MAIN DASHBOARD
+  const displayName = user.name || currentUser.name || "there";
+  const firstName = displayName.trim().split(/\s+/)[0] || "there";
+  const progressWidth = Math.min(100, Math.max(0, percent));
+  const todayLabel = new Intl.DateTimeFormat("en-MY", {
+    weekday: "long", day: "numeric", month: "long",
+  }).format(new Date());
+
   return (
-    <div className="site">
-      <div className="ambient ambient-one" />
-      <div className="ambient ambient-two" />
-
-      <header className="topbar">
-        <a className="brand" href="#home">
-          <span className="brand-logo">
-            N<span>+</span>
-          </span>
-
-          <span className="brand-name">
-            NUTRITRACK
-            <small>FOOD · FITNESS · YOU</small>
-          </span>
+    <div className="nt-app">
+      <header className="nt-header">
+        <a className="nt-brand" href="#home" aria-label="NutriTrack home">
+          <span className="nt-brand-mark">N<span>+</span></span>
+          <span className="nt-brand-copy">NUTRITRACK<small>YOUR DAILY NUTRITION</small></span>
         </a>
-
-        <nav className="navigation">
-          <a className="nav-active" href="#home">Home</a>
-          <a href="#profile">BMI & Calories</a>
-          <a href="#food-search">Food Search</a>
-          <a href="#diary">My Diary</a>
+        <nav className="nt-nav" aria-label="Main navigation">
+          <a className="active" href="#home">Overview</a>
+          <a href="#food-search">Food scanner</a>
+          <a href="#diary">My diary</a>
+          <a href="#profile">My goals</a>
         </nav>
-
-        <div className="account-actions">
-          <a className="profile-pill" href="#profile">
-            <span className="profile-dot">
-              {(user.name || currentUser.name || "A")
-                .charAt(0)
-                .toUpperCase()}
-            </span>
-
-            <span>
-              {user.name ||
-                currentUser.name ||
-                "My Account"}
-            </span>
-          </a>
-
-          <button
-            className="logout-button"
-            type="button"
-            onClick={logout}
-          >
-            Log out
-          </button>
+        <div className="nt-user-menu">
+          <a className="nt-user-chip" href="#profile"><span>{displayName.charAt(0).toUpperCase()}</span><b>{displayName}</b></a>
+          <button type="button" className="nt-logout" onClick={logout}>Log out</button>
         </div>
       </header>
 
-      <main className="page">
-        {/* HERO */}
-        <section className="hero" id="home">
-          <div className="hero-copy">
-            <div className="hero-kicker">
-              <span /> YOUR PERSONAL NUTRITION SPACE
-            </div>
-
-            <h1>
-              Discover a<br />
-              healthier <span>you.</span>
-            </h1>
-
-            <p className="hero-description">
-              Eat what you love. Understand what you eat.
-              Build better habits, one meal at a time.
-            </p>
-
-            <div className="hero-actions">
-              <a className="btn-lime" href="#profile">
-                Calculate my goals <span>↗</span>
-              </a>
-
-              <a className="btn-outline" href="#diary">
-                My food diary <span>→</span>
-              </a>
-            </div>
-
-            <div className="hero-social-proof">
-              <div className="avatar-stack">
-                <span>🥑</span>
-                <span>🍋</span>
-                <span>🥦</span>
-                <b>+</b>
-              </div>
-
-              <div>
-                <strong>Better choices, every day</strong>
-                <small>
-                  Your personal nutrition journey starts here.
-                </small>
-              </div>
-            </div>
+      <main className="nt-main" id="home">
+        <div className="nt-welcome-row">
+          <div>
+            <div className="nt-eyebrow"><span className="nt-live-dot" /> YOUR PERSONAL HEALTH SPACE</div>
+            <h1>Good day, {firstName}<span>.</span></h1>
+            <p className="nt-subtitle">A little progress every day adds up. Here is your nutrition overview.</p>
           </div>
+          <div className="nt-date-chip"><span>▦</span>{todayLabel}</div>
+        </div>
 
-          <div className="hero-visual">
-            <div className="visual-orbit orbit-one" />
-            <div className="visual-orbit orbit-two" />
-            <div className="visual-glow" />
+        {error && <div className="nt-alert error" role="alert"><span>!</span><p>{error}</p><button type="button" onClick={() => setError("")} aria-label="Dismiss">×</button></div>}
+        {message && <div className="nt-alert success" role="status"><span>✓</span><p>{message}</p><button type="button" onClick={() => setMessage("")} aria-label="Dismiss">×</button></div>}
 
-            <div className="hero-badge badge-top">
-              <span>✳</span> DAILY WELLNESS
-            </div>
-
-            <div className="hero-plate">
-              <div className="plate-ring">
-                <div className="plate-food">
-                  <div className="plate-leaf leaf-one" />
-                  <div className="plate-leaf leaf-two" />
-                  <div className="plate-leaf leaf-three" />
-                  <div className="plate-rice">🍚</div>
-                  <div className="plate-protein">🍗</div>
-                  <div className="plate-veggies">🥦</div>
-                  <div className="plate-tomato">🍅</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="floating-card float-calories">
-              <span className="float-icon">✳</span>
-
-              <div>
-                <small>CONSUMED TODAY</small>
-                <strong>
-                  {loading ? "..." : formatNumber(consumed)}
-                  {" "}
-                  <i>kcal</i>
-                </strong>
-              </div>
-            </div>
-
-            <div className="floating-card float-goal">
-              <span className="goal-ring">✓</span>
-
-              <div>
-                <small>DAILY CALORIE GOAL</small>
-                <strong>{formatNumber(goal)} kcal</strong>
-              </div>
-            </div>
-
-            <div className="hero-stats">
-              <span className="stats-label">
-                YOUR DAILY STATS
-              </span>
-
-              <div>
-                <small>Consumed</small>
-                <strong>
-                  {formatNumber(consumed)} <i>kcal</i>
-                </strong>
-              </div>
-
-              <div>
-                <small>Remaining</small>
-                <strong className="stat-green">
-                  {formatNumber(remaining)} <i>kcal</i>
-                </strong>
-              </div>
-
-              <div>
-                <small>Daily goal</small>
-                <strong>
-                  {formatNumber(goal)} <i>kcal</i>
-                </strong>
-              </div>
-
-              <div className="hero-progress">
-                <span style={{ width: `${percent}%` }} />
-              </div>
-
-              <small className="progress-note">
-                {Math.round(percent)}% of your daily goal
-              </small>
-            </div>
-
-            <div className="hero-caption">
-              NOURISH YOUR BODY <span>✳</span>
-            </div>
-          </div>
-
-          <div className="hero-index">
-            <span>01</span> / YOUR JOURNEY
-          </div>
+        <section className="nt-overview-grid" aria-label="Daily calorie overview">
+          <article className="nt-calorie-card">
+            <div className="nt-card-heading"><div><span className="nt-card-label">DAILY CALORIE INTAKE</span><h2>Your energy today</h2></div><span className="nt-card-icon">✳</span></div>
+            <div className="nt-calorie-main"><strong>{loading ? "…" : formatNumber(consumed)}</strong><span>kcal consumed</span></div>
+            <div className="nt-progress-track"><span style={{ width: `${progressWidth}%` }} /></div>
+            <div className="nt-progress-meta"><span>{Math.round(percent)}% of daily target</span><b>{formatNumber(goal)} kcal goal</b></div>
+            <div className="nt-calorie-footer"><div><small>REMAINING</small><strong>{formatNumber(remaining)} <i>kcal</i></strong></div><div><small>DAILY TARGET</small><strong>{formatNumber(goal)} <i>kcal</i></strong></div></div>
+          </article>
+          <article className="nt-summary-card protein-card"><div className="nt-summary-icon">◉</div><span>FOOD ENTRIES</span><strong>{logs.length}</strong><small>Meals and snacks logged today</small><a href="#diary">View diary ↗</a></article>
+          <article className="nt-summary-card bmi-card"><div className="nt-summary-icon">⌁</div><span>YOUR BMI</span><strong>{bmi == null ? "—" : bmi.toFixed(1)}</strong><small>{currentBmiCategory}</small><a href="#profile">View health profile ↗</a></article>
         </section>
 
-        {/* NOTIFICATIONS */}
-        {error && (
-          <div
-            className="notice notice-error"
-            role="alert"
-          >
-            <span>!</span>
-            <p>{error}</p>
-
-            <button
-              onClick={() => setError("")}
-              type="button"
-              aria-label="Dismiss error"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        {message && (
-          <div
-            className="notice notice-success"
-            role="status"
-          >
-            <span>✓</span>
-            <p>{message}</p>
-
-            <button
-              onClick={() => setMessage("")}
-              type="button"
-              aria-label="Dismiss message"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        {/* QUICK STATS */}
-        <section className="quick-stats">
-          <div className="quick-stat">
-            <span className="quick-stat-icon lime">◉</span>
-            <div>
-              <small>CALORIES CONSUMED</small>
-              <strong>
-                {formatNumber(consumed)} <i>kcal</i>
-              </strong>
-              <p>Today's intake</p>
-            </div>
-          </div>
-
-          <div className="quick-stat">
-            <span className="quick-stat-icon mint">↘</span>
-            <div>
-              <small>CALORIES REMAINING</small>
-              <strong>
-                {formatNumber(remaining)} <i>kcal</i>
-              </strong>
-              <p>Room for your next meal</p>
-            </div>
-          </div>
-
-          <div className="quick-stat">
-            <span className="quick-stat-icon blue">◎</span>
-            <div>
-              <small>DAILY TARGET</small>
-              <strong>
-                {formatNumber(goal)} <i>kcal</i>
-              </strong>
-              <p>Your personal goal</p>
-            </div>
-          </div>
-
-          <div className="quick-stat">
-            <span className="quick-stat-icon peach">♡</span>
-            <div>
-              <small>GOAL CONSUMED</small>
-              <strong>
-                {Math.round(percent)}<i>%</i>
-              </strong>
-              <p>Of your daily target</p>
-            </div>
-          </div>
+        <section className="nt-quick-actions" aria-label="Quick actions">
+          <a href="#food-search" className="nt-action-card"><span className="nt-action-icon">⌕</span><span><b>Find a food</b><small>Search nutrition information</small></span><i>↗</i></a>
+          <button type="button" className="nt-action-card" onClick={() => { setPhotoExpanded(true); document.getElementById("food-search")?.scrollIntoView({ behavior: "smooth" }); }}><span className="nt-action-icon scan">▧</span><span><b>AI food scanner</b><small>Estimate nutrition from a photo</small></span><i>↗</i></button>
+          <a href="#profile" className="nt-action-card"><span className="nt-action-icon goals">◎</span><span><b>Update my goals</b><small>Review your daily targets</small></span><i>↗</i></a>
         </section>
 
-        {/* BMI AND CALORIE CALCULATOR */}
-        <section className="section-panel" id="profile">
-          <div className="section-top">
-            <div>
-              <span className="section-kicker">
-                YOUR PERSONAL PROFILE
-              </span>
+        <section className="nt-content-grid">
+          <div className="nt-primary-column">
+            <section className="nt-panel" id="food-search">
+              <div className="nt-panel-heading"><div><span className="nt-eyebrow">SMART FOOD TRACKING</span><h2>What did you <em>eat?</em></h2><p>Search a meal or let AI estimate nutrition from a food photo.</p></div><span className="nt-step-tag">01 / TRACK</span></div>
+              <form className="nt-search" onSubmit={searchFood}><span>⌕</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Try nasi lemak, ayam goreng, roti canai..." aria-label="Search food"/><button type="submit" disabled={searching}>{searching ? "Searching…" : "Search food"}</button></form>
+              <div className="nt-popular"><span>POPULAR</span>{["Nasi lemak", "Ayam goreng", "Roti canai", " teh tarik"].map(item => <button key={item} type="button" onClick={() => setQuery(item.trim())}>{item.trim()}</button>)}</div>
+              {results.length > 0 && <div className="nt-results"><div className="nt-results-title"><h3>Search results</h3><span>{results.length} found</span></div><div className="nt-food-grid">{results.map((food, index) => <FoodCard key={foodId(food) ?? `${food.name}-${index}`} food={food} />)}</div></div>}
+              {searching && <div className="nt-inline-loading"><span className="nt-spinner"/>Finding nutrition information…</div>}
+              {!searching && results.length === 0 && <div className="nt-search-hint"><span>✦</span><div><b>Nutrition lookup powered by AI</b><small>Search common Malaysian meals and review the estimated serving and macros.</small></div></div>}
 
-              <h2>
-                BMI & calorie <span>calculator.</span>
-              </h2>
-
-              <p>
-                Update your details to estimate your BMI and daily
-                calorie target.
-              </p>
-            </div>
-
-            <span className="section-number">01</span>
-          </div>
-
-          {profileLoading ? (
-            <p className="empty-state">
-              Loading your profile...
-            </p>
-          ) : (
-            <>
-              <form
-                className="profile-form"
-                onSubmit={saveProfile}
-              >
-                <div className="profile-fields">
-                  <label>
-                    Age (years)
-                    <input
-                      type="number"
-                      min="1"
-                      max="119"
-                      value={profile.age}
-                      onChange={(event) =>
-                        updateProfile("age", event.target.value)
-                      }
-                      required
-                    />
-                  </label>
-
-                  <label>
-                    Sex
-                    <select
-                      value={profile.gender}
-                      onChange={(event) =>
-                        updateProfile("gender", event.target.value)
-                      }
-                      required
-                    >
-                      <option value="male">Male</option>
-                      <option value="female">Female</option>
-                    </select>
-                  </label>
-
-                  <label>
-                    Weight (kg)
-                    <input
-                      type="number"
-                      min="1"
-                      max="499"
-                      step="0.1"
-                      value={profile.weight}
-                      onChange={(event) =>
-                        updateProfile("weight", event.target.value)
-                      }
-                      required
-                    />
-                  </label>
-
-                  <label>
-                    Height (cm)
-                    <input
-                      type="number"
-                      min="1"
-                      max="299"
-                      step="0.1"
-                      value={profile.height}
-                      onChange={(event) =>
-                        updateProfile("height", event.target.value)
-                      }
-                      required
-                    />
-                  </label>
-
-                  <label>
-                    Activity level
-                    <select
-                      value={profile.activity_level}
-                      onChange={(event) =>
-                        updateProfile(
-                          "activity_level",
-                          event.target.value
-                        )
-                      }
-                      required
-                    >
-                      <option value="sedentary">
-                        Sedentary — little exercise
-                      </option>
-                      <option value="light">
-                        Light — exercise 1–3 days/week
-                      </option>
-                      <option value="moderate">
-                        Moderate — exercise 3–5 days/week
-                      </option>
-                      <option value="active">
-                        Active — exercise 6–7 days/week
-                      </option>
-                      <option value="very_active">
-                        Very active — intense activity
-                      </option>
-                    </select>
-                  </label>
-
-                  <label>
-                    Weight goal
-                    <select
-                      value={profile.weight_goal}
-                      onChange={(event) =>
-                        updateProfile(
-                          "weight_goal",
-                          event.target.value
-                        )
-                      }
-                      required
-                    >
-                      <option value="lose">Lose weight</option>
-                      <option value="maintain">Maintain weight</option>
-                      <option value="gain">Gain weight</option>
-                    </select>
-                  </label>
-                </div>
-
-                <button
-                  className="btn-lime"
-                  type="submit"
-                  disabled={
-                    profileSaving || !profileLoaded
-                  }
-                >
-                  {profileSaving
-                    ? "Saving profile..."
-                    : "Save profile & recalculate ↗"}
-                </button>
-              </form>
-
-              <div className="profile-results">
-                <article className="profile-result-card">
-                  <span className="section-kicker">
-                    YOUR BMI
-                  </span>
-
-                  <strong>
-                    {bmi == null ? "—" : bmi.toFixed(1)}
-                  </strong>
-
-                  <p>{currentBmiCategory}</p>
-
-                  <small>
-                    Adult BMI categories are a screening guide,
-                    not a diagnosis.
-                  </small>
-                </article>
-
-                <article className="profile-result-card">
-                  <span className="section-kicker">
-                    DAILY CALORIE TARGET
-                  </span>
-
-                  <strong>
-                    {formatNumber(
-                      user.daily_calorie_goal ?? goal
-                    )}
-                    <small> kcal/day</small>
-                  </strong>
-
-                  <p>
-                    Goal:{" "}
-                    {profile.weight_goal === "lose"
-                      ? "Lose weight"
-                      : profile.weight_goal === "gain"
-                        ? "Gain weight"
-                        : "Maintain weight"}
-                  </p>
-
-                  <small>
-                    An estimate based on your profile and
-                    activity level.
-                  </small>
-                </article>
+              <div className="nt-scanner-box">
+                <div className="nt-scanner-heading"><span className="nt-scanner-icon">✧</span><div><b>AI photo scanner</b><small>Turn a meal photo into a nutrition estimate</small></div><button type="button" onClick={() => setPhotoExpanded(value => !value)}>{photoExpanded ? "Hide" : "Open scanner"} {photoExpanded ? "−" : "+"}</button></div>
+                {photoExpanded && <div className="nt-scanner-content">
+                  <div className="nt-upload-area"><div className="nt-upload-symbol">▧</div><div><b>Upload your meal photo</b><p>Choose a clear JPG, PNG or WEBP image. Maximum 10 MB.</p></div><label className="nt-upload-button">Choose image<input type="file" accept="image/jpeg,image/png,image/webp" onChange={selectPhoto} disabled={analysing || saving}/></label></div>
+                  {preview && <div className="nt-photo-preview"><img src={preview} alt="Selected food"/><div><b>{photo?.name || "Selected food"}</b><small>{photo ? (photo.size / 1024 / 1024).toFixed(2) : "0"} MB</small><div className="nt-photo-buttons"><button type="button" onClick={analysePhoto} disabled={analysing || saving}>{analysing ? "Analysing…" : "Analyse with AI"}</button><button type="button" className="nt-secondary-button" onClick={clearPhoto} disabled={analysing || saving}>Remove</button></div></div></div>}
+                  {analysing && <div className="nt-inline-loading"><span className="nt-spinner"/>Gemini is analysing your food photo…</div>}
+                </div>}
               </div>
 
-              <p className="nutrition-tip">
-                Calorie needs vary between individuals. BMI does
-                not directly measure body fat or overall health.
-                Use these results as estimates, not medical advice.
-              </p>
-            </>
-          )}
+              {selected && <div className="nt-selected-food"><div className="nt-selected-heading"><span>{foodEmoji(selected.name)}</span><div><small>REVIEW NUTRITION ESTIMATE</small><h3>{selected.name}</h3><p>{selected.serving_size}</p></div></div><div className="nt-macro-grid"><div><small>CALORIES</small><b>{formatNumber(selected.calories)} kcal</b></div><div><small>PROTEIN</small><b>{selected.protein} g</b></div><div><small>CARBS</small><b>{selected.carbohydrates} g</b></div><div><small>FAT</small><b>{selected.fat} g</b></div></div>{selected.disclaimer && <p className="nt-disclaimer">{selected.disclaimer}</p>}<div className="nt-add-controls"><label>Meal<select value={meal} onChange={event => setMeal(event.target.value)}>{MEALS.map(item => <option value={item} key={item}>{item.charAt(0).toUpperCase() + item.slice(1)}</option>)}</select></label><label>Quantity<input type="number" min="0.1" max="100" step="0.5" value={quantity} onChange={event => setQuantity(event.target.value)}/></label><button type="button" onClick={() => addToDiary()} disabled={saving || analysing}>{saving ? "Adding…" : "Add to diary ↗"}</button><button type="button" className="nt-secondary-button" onClick={() => setSelected(null)} disabled={saving}>Cancel</button></div></div>}
+            </section>
+
+            <section className="nt-panel" id="diary">
+              <div className="nt-panel-heading"><div><span className="nt-eyebrow">YOUR DAILY JOURNAL</span><h2>Today's <em>food diary</em></h2><p>Keep track of every meal throughout your day.</p></div><span className="nt-step-tag">02 / REVIEW</span></div>
+              <div className="nt-meal-summary">{MEALS.map(item => <div key={item}><span>{item === "breakfast" ? "☀" : item === "lunch" ? "◉" : item === "dinner" ? "☾" : "✳"} {item}</span><b>{formatNumber(meals[item] ?? meals[item === "snacks" ? "snack" : item] ?? 0)} <small>kcal</small></b></div>)}</div>
+              {loading ? <div className="nt-empty"><span className="nt-spinner"/><p>Loading your food diary…</p></div> : logs.length > 0 ? <div className="nt-diary-list">{logs.map((log, index) => { const name = log.food?.name || log.food_name || log.name || `Food entry ${index + 1}`; const logMeal = String(log.meal_type || "snacks"); return <div className="nt-diary-row" key={log.id ?? log.log_id ?? `${name}-${index}`}><span className="nt-diary-emoji">{foodEmoji(name)}</span><div className="nt-diary-details"><b>{name}</b><small>{logMeal} · Quantity {log.quantity ?? 1}</small></div><strong>{formatNumber(log.calories ?? 0)} <small>kcal</small></strong><button type="button" onClick={() => deleteLog(log)} aria-label={`Remove ${name}`}>×</button></div>; })}</div> : <div className="nt-empty"><span>🥗</span><h3>No meals logged yet</h3><p>Start by searching for your first meal or scanning a food photo.</p><a href="#food-search">Find a food ↗</a></div>}
+            </section>
+          </div>
+
+          <aside className="nt-sidebar">
+            <section className="nt-panel nt-goal-panel"><div className="nt-panel-heading"><div><span className="nt-eyebrow">YOUR TARGET</span><h2>Daily <em>goal</em></h2></div></div><div className="nt-goal-number"><strong>{formatNumber(goal)}</strong><span>kcal / day</span></div><div className="nt-goal-track"><span style={{ width: `${progressWidth}%` }}/></div><div className="nt-goal-legend"><span>Consumed <b>{formatNumber(consumed)}</b></span><span>Left <b>{formatNumber(remaining)}</b></span></div><a className="nt-text-link" href="#profile">Adjust my target ↗</a></section>
+            <section className="nt-panel nt-profile-panel" id="profile"><div className="nt-panel-heading"><div><span className="nt-eyebrow">PERSONAL DETAILS</span><h2>Health <em>profile</em></h2><p>Update your details to recalculate your target.</p></div></div>
+              {profileLoading ? <div className="nt-empty"><span className="nt-spinner"/><p>Loading profile…</p></div> : <form className="nt-profile-form" onSubmit={saveProfile}>
+                <label>Age (years)<input type="number" min="1" max="119" value={profile.age} onChange={event => updateProfile("age", event.target.value)} required/></label>
+                <label>Sex<select value={profile.gender} onChange={event => updateProfile("gender", event.target.value)} required><option value="male">Male</option><option value="female">Female</option></select></label>
+                <div className="nt-two-fields"><label>Weight (kg)<input type="number" min="1" max="499" step="0.1" value={profile.weight} onChange={event => updateProfile("weight", event.target.value)} required/></label><label>Height (cm)<input type="number" min="1" max="299" step="0.1" value={profile.height} onChange={event => updateProfile("height", event.target.value)} required/></label></div>
+                <label>Activity level<select value={profile.activity_level} onChange={event => updateProfile("activity_level", event.target.value)} required><option value="sedentary">Sedentary</option><option value="light">Light</option><option value="moderate">Moderate</option><option value="active">Active</option><option value="very_active">Very active</option></select></label>
+                <label>Weight goal<select value={profile.weight_goal} onChange={event => updateProfile("weight_goal", event.target.value)} required><option value="lose">Lose weight</option><option value="maintain">Maintain weight</option><option value="gain">Gain weight</option></select></label>
+                <div className="nt-bmi-inline"><span>BMI <b>{bmi == null ? "—" : bmi.toFixed(1)}</b></span><span>{currentBmiCategory}</span></div>
+                <button type="submit" disabled={profileSaving || !profileLoaded}>{profileSaving ? "Saving…" : "Save profile & recalculate"}</button>
+              </form>}
+            </section>
+            <div className="nt-ai-note"><span>✦</span><div><b>AI nutrition estimates</b><p>Food values are estimates. Review serving sizes and nutrition before saving them to your diary.</p></div></div>
+          </aside>
         </section>
 
-        {/* FOOD SEARCH */}
-        <section className="section-panel" id="food-search">
-          <div className="section-top">
-            <div>
-              <span className="section-kicker">
-                FIND YOUR NEXT FAVOURITE
-              </span>
-
-              <h2>
-                What's on your <span>plate?</span>
-              </h2>
-
-              <p>
-                Search Malaysian favourites or any food. Gemini
-                can estimate nutrition when a food is not in our
-                database.
-              </p>
-            </div>
-
-            <span className="section-number">02</span>
-          </div>
-
-          <form
-            className="search-bar"
-            onSubmit={searchFood}
-          >
-            <span className="search-icon">⌕</span>
-
-            <input
-              value={query}
-              onChange={(event) =>
-                setQuery(event.target.value)
-              }
-              placeholder="Search any food, e.g. chicken chop, nasi kerabu..."
-              aria-label="Search food"
-            />
-
-            <button
-              className="btn-lime"
-              type="submit"
-              disabled={searching}
-            >
-              {searching ? "Searching..." : "Search food ↗"}
-            </button>
-          </form>
-
-          <div className="popular-searches">
-            <span>POPULAR</span>
-
-            {[
-              "Nasi lemak",
-              "Ayam goreng",
-              "Nasi ayam",
-              "Roti canai",
-            ].map((term) => (
-              <button
-                type="button"
-                key={term}
-                onClick={() => setQuery(term)}
-              >
-                {term}
-              </button>
-            ))}
-          </div>
-
-          {results.length > 0 && (
-            <div className="result-area">
-              <div className="subheading">
-                <h3>Search results</h3>
-                <span>{results.length} found</span>
-              </div>
-
-              <div className="food-grid">
-                {results.map((food, index) => (
-                  <FoodCard
-                    key={
-                      foodId(food) ??
-                      `${food.name}-${index}`
-                    }
-                    food={food}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* PHOTO ANALYSIS */}
-          {!photoExpanded ? (
-            <button
-              className="btn-outline photo-compact-button"
-              type="button"
-              onClick={() => setPhotoExpanded(true)}
-            >
-              <span>▧</span> Analyse food from photo ↗
-            </button>
-          ) : (
-            <div className="photo-analysis-expanded">
-              <div className="photo-upload">
-                <div className="upload-symbol">▧</div>
-
-                <div className="upload-copy">
-                  <h3>AI food photo analysis</h3>
-
-                  <p>
-                    Upload a meal photo to estimate calories,
-                    protein, carbohydrates, and fat using
-                    Google Gemini.
-                  </p>
-
-                  <small>
-                    JPG, PNG, or WEBP · Maximum 10 MB
-                  </small>
-                </div>
-
-                <label className="btn-outline upload-label">
-                  Choose photo
-
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    onChange={selectPhoto}
-                    disabled={analysing || saving}
-                  />
-                </label>
-              </div>
-
-              {preview && (
-                <div className="photo-review">
-                  <img
-                    src={preview}
-                    alt="Selected food for AI analysis"
-                  />
-
-                  <div>
-                    <strong>
-                      {photo?.name || "Selected food photo"}
-                    </strong>
-
-                    <p>
-                      Image size:{" "}
-                      {photo
-                        ? (
-                            photo.size /
-                            1024 /
-                            1024
-                          ).toFixed(2)
-                        : "0"}{" "}
-                      MB
-                    </p>
-
-                    <div className="photo-actions">
-                      <button
-                        className="btn-lime"
-                        type="button"
-                        onClick={analysePhoto}
-                        disabled={analysing || saving}
-                      >
-                        {analysing
-                          ? "AI is analysing..."
-                          : "Analyse photo ↗"}
-                      </button>
-
-                      <button
-                        className="cancel-button"
-                        type="button"
-                        onClick={clearPhoto}
-                        disabled={analysing || saving}
-                      >
-                        Remove photo
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {analysing && (
-                <div
-                  className="analysis-progress"
-                  role="status"
-                >
-                  <span className="analysis-spinner" />
-
-                  <div>
-                    <strong>
-                      Analysing your food photo...
-                    </strong>
-
-                    <p>
-                      Google Gemini is analysing your photo.
-                      This may take a few seconds.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              <button
-                className="cancel-button photo-close-button"
-                type="button"
-                onClick={() => setPhotoExpanded(false)}
-                disabled={analysing || saving}
-              >
-                Close photo analysis
-              </button>
-            </div>
-          )}
-
-          {/* SELECTED FOOD */}
-          {selected && (
-            <div className="selected-panel">
-              <div className="selected-title">
-                <span className="selected-emoji">
-                  {foodEmoji(selected.name)}
-                </span>
-
-                <div>
-                  <small>
-                    {selected.source
-                      ?.toLowerCase()
-                      .includes("gemini") ||
-                    selected.source ===
-                      "Ollama AI estimate" ||
-                    selected.source ===
-                      "Ollama Qwen3-VL 4B"
-                      ? "AI ESTIMATE — PLEASE REVIEW"
-                      : "READY TO ADD"}
-                  </small>
-
-                  <h3>{selected.name}</h3>
-
-                  <p>
-                    {selected.serving_size} ·{" "}
-                    {formatNumber(
-                      selected.calories *
-                        (Number(quantity) || 1)
-                    )}{" "}
-                    kcal
-                  </p>
-                </div>
-              </div>
-
-              <div className="nutrition-breakdown">
-                <div>
-                  <span>Calories</span>
-                  <strong>
-                    {formatNumber(selected.calories)} kcal
-                  </strong>
-                </div>
-
-                <div>
-                  <span>Protein</span>
-                  <strong>{selected.protein} g</strong>
-                </div>
-
-                <div>
-                  <span>Carbs</span>
-                  <strong>
-                    {selected.carbohydrates} g
-                  </strong>
-                </div>
-
-                <div>
-                  <span>Fat</span>
-                  <strong>{selected.fat} g</strong>
-                </div>
-              </div>
-
-              {selected.disclaimer && (
-                <p className="ai-disclaimer">
-                  {selected.disclaimer}
-                </p>
-              )}
-
-              <div className="selected-controls">
-                <label>
-                  Meal
-
-                  <select
-                    value={meal}
-                    onChange={(event) =>
-                      setMeal(event.target.value)
-                    }
-                  >
-                    {MEALS.map((item) => (
-                      <option value={item} key={item}>
-                        {item.charAt(0).toUpperCase() +
-                          item.slice(1)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label>
-                  Quantity
-
-                  <input
-                    type="number"
-                    min="0.1"
-                    max="100"
-                    step="0.5"
-                    value={quantity}
-                    onChange={(event) =>
-                      setQuantity(event.target.value)
-                    }
-                  />
-                </label>
-
-                <button
-                  className="btn-lime"
-                  type="button"
-                  onClick={() => addToDiary()}
-                  disabled={saving || analysing}
-                >
-                  {saving
-                    ? "Adding..."
-                    : "Add to diary ↗"}
-                </button>
-
-                <button
-                  className="cancel-button"
-                  type="button"
-                  onClick={() => setSelected(null)}
-                  disabled={saving}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
-
-        {/* FOOD DIARY */}
-        <section className="section-panel" id="diary">
-          <div className="section-top">
-            <div>
-              <span className="section-kicker">
-                YOUR DAILY PROGRESS
-              </span>
-
-              <h2>
-                Your food <span>diary.</span>
-              </h2>
-
-              <p>
-                Every meal is another step towards your goal.
-              </p>
-            </div>
-
-            <span className="section-number">03</span>
-          </div>
-
-          <div className="meal-totals">
-            {MEALS.map((item) => (
-              <div className="meal-total" key={item}>
-                <span>
-                  {item === "breakfast"
-                    ? "☀"
-                    : item === "lunch"
-                      ? "◉"
-                      : item === "dinner"
-                        ? "☾"
-                        : "✳"}{" "}
-                  {item}
-                </span>
-
-                <strong>
-                  {formatNumber(
-                    meals[item] ??
-                      meals[
-                        item === "snacks"
-                          ? "snack"
-                          : item
-                      ] ??
-                      0
-                  )}{" "}
-                  <small>kcal</small>
-                </strong>
-              </div>
-            ))}
-          </div>
-
-          {loading ? (
-            <p className="empty-state">
-              Loading your diary...
-            </p>
-          ) : logs.length > 0 ? (
-            <div className="diary-list">
-              {logs.map((log, index) => {
-                const name =
-                  log.food?.name ||
-                  log.food_name ||
-                  log.name ||
-                  `Food entry ${index + 1}`;
-
-                const logMeal = String(
-                  log.meal_type || "snacks"
-                );
-
-                return (
-                  <div
-                    className="diary-row"
-                    key={
-                      log.id ??
-                      log.log_id ??
-                      `${name}-${index}`
-                    }
-                  >
-                    <span className="diary-emoji">
-                      {foodEmoji(name)}
-                    </span>
-
-                    <div className="diary-info">
-                      <strong>{name}</strong>
-
-                      <small>
-                        {logMeal} · Quantity{" "}
-                        {log.quantity ?? 1}
-                      </small>
-                    </div>
-
-                    <strong className="diary-kcal">
-                      {formatNumber(log.calories ?? 0)} kcal
-                    </strong>
-
-                    <button
-                      className="remove-log"
-                      type="button"
-                      onClick={() => deleteLog(log)}
-                      aria-label={`Remove ${name}`}
-                    >
-                      ×
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="empty-state">
-              <span>🥗</span>
-
-              <h3>Your food diary starts here.</h3>
-
-              <p>
-                Search for a meal to add your first diary entry.
-              </p>
-
-              <a className="btn-lime" href="#food-search">
-                Find a meal ↗
-              </a>
-            </div>
-          )}
-        </section>
-
-        {/* FOOTER */}
-        <footer className="footer">
-          <a className="brand" href="#home">
-            <span className="brand-logo">
-              N<span>+</span>
-            </span>
-
-            <span className="brand-name">
-              NUTRITRACK
-              <small>FOOD · FITNESS · YOU</small>
-            </span>
-          </a>
-
-          <p>Eat well. Feel well. Live well.</p>
-
-          <a href="#home">Back to top ↑</a>
-        </footer>
+        <footer className="nt-footer"><a className="nt-brand" href="#home"><span className="nt-brand-mark">N<span>+</span></span><span className="nt-brand-copy">NUTRITRACK<small>YOUR DAILY NUTRITION</small></span></a><span>Eat well. Feel well. Live well.</span><a href="#home">Back to top ↑</a></footer>
       </main>
+
+      <nav className="nt-mobile-nav" aria-label="Mobile navigation"><a href="#home"><span>⌂</span><small>Home</small></a><a href="#food-search"><span>⌕</span><small>Search</small></a><button type="button" onClick={() => { setPhotoExpanded(true); document.getElementById("food-search")?.scrollIntoView({ behavior: "smooth" }); }}><span>✧</span><small>Scan</small></button><a href="#diary"><span>▤</span><small>Diary</small></a><a href="#profile"><span>◎</span><small>Goals</small></a></nav>
     </div>
   );
 }
