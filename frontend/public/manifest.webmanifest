@@ -1,6 +1,7 @@
+
 {
   "id": "/",
-  "name": "NutriTrack \u2013 AI Calorie Tracker",
+  "name": "NutriTrack – AI Calorie Tracker",
   "short_name": "NutriTrack",
   "description": "Track your meals, calories and nutrition with AI.",
   "start_url": "/",
