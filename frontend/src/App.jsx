@@ -742,38 +742,113 @@ function App() {
 
   if (!currentUser) {
     return (
-      <div className="auth-page">
-        <div className="auth-card">
-          <a className="brand auth-brand" href="#auth">
-            <span className="brand-logo">N<span>+</span></span>
-            <span className="brand-name">NUTRITRACK<small>FOOD · FITNESS · YOU</small></span>
-          </a>
-          <span className="section-kicker">YOUR PERSONAL NUTRITION SPACE</span>
-          <h1>{authMode === "register" ? "Create your account." : "Welcome back."}</h1>
-          <p className="auth-intro">Understand your food. Build healthier habits.</p>
-          <div className="auth-tabs">
-            <button type="button" className={authMode === "login" ? "auth-tab active" : "auth-tab"} onClick={() => { setAuthMode("login"); setError(""); }}>Log in</button>
-            <button type="button" className={authMode === "register" ? "auth-tab active" : "auth-tab"} onClick={() => { setAuthMode("register"); setError(""); }}>Create account</button>
-          </div>
-          {error && <div className="notice notice-error" role="alert"><span>!</span><p>{error}</p></div>}
-          <form className="auth-form" onSubmit={submitAuth}>
-            {authMode === "register" && <>
-              <label>Full name<input value={authForm.name} onChange={e => updateAuthForm("name", e.target.value)} required autoComplete="name" /></label>
-            </>}
-            <label>Email address<input type="email" value={authForm.email} onChange={e => updateAuthForm("email", e.target.value)} required autoComplete="email" /></label>
-            <label>Password<input type="password" value={authForm.password} onChange={e => updateAuthForm("password", e.target.value)} required minLength="6" autoComplete={authMode === "register" ? "new-password" : "current-password"} /></label>
-            {authMode === "register" && <>
-              <div className="auth-grid">
-                <label>Age<input type="number" min="1" max="119" value={authForm.age} onChange={e => updateAuthForm("age", e.target.value)} required /></label>
-                <label>Gender<select value={authForm.gender} onChange={e => updateAuthForm("gender", e.target.value)}><option value="male">Male</option><option value="female">Female</option></select></label>
-                <label>Weight (kg)<input type="number" min="1" max="499" step="0.1" value={authForm.weight} onChange={e => updateAuthForm("weight", e.target.value)} required /></label>
-                <label>Height (cm)<input type="number" min="1" max="299" step="0.1" value={authForm.height} onChange={e => updateAuthForm("height", e.target.value)} required /></label>
-                <label className="auth-full">Activity level<select value={authForm.activity_level} onChange={e => updateAuthForm("activity_level", e.target.value)}><option value="sedentary">Sedentary</option><option value="light">Light</option><option value="moderate">Moderate</option><option value="active">Active</option><option value="very active">Very active</option></select></label>
+      <div className="nt-auth-page">
+        <div className="nt-auth-glow nt-auth-glow-one" />
+        <div className="nt-auth-glow nt-auth-glow-two" />
+
+        <div className="nt-auth-layout">
+          <section className="nt-auth-showcase">
+            <a className="nt-auth-brand" href="#auth">
+              <span className="nt-auth-logo">N<span>+</span></span>
+              <span>
+                NUTRITRACK
+                <small>FOOD · FITNESS · YOU</small>
+              </span>
+            </a>
+
+            <div className="nt-auth-showcase-content">
+              <span className="nt-auth-eyebrow">YOUR PERSONAL NUTRITION SPACE</span>
+              <h1>Eat better.<br /><em>Live better.</em></h1>
+              <p>
+                Understand your food, track your nutrition and build healthier
+                habits with your personal AI-powered food companion.
+              </p>
+
+              <div className="nt-auth-feature">
+                <span>✦</span>
+                <div><b>AI-powered food scanner</b><small>Discover nutrition from your meal photos.</small></div>
               </div>
-            </>}
-            <button className="btn-lime auth-submit" type="submit" disabled={authLoading}>{authLoading ? "Please wait..." : authMode === "register" ? "Create account ↗" : "Log in ↗"}</button>
-          </form>
-          <p className="auth-footnote">Your nutrition data is linked to your account.</p>
+              <div className="nt-auth-feature">
+                <span>◉</span>
+                <div><b>Smart calorie tracking</b><small>Stay informed about your daily nutrition.</small></div>
+              </div>
+              <div className="nt-auth-feature">
+                <span>⌁</span>
+                <div><b>Your personal health goals</b><small>Make small improvements every day.</small></div>
+              </div>
+            </div>
+
+            <div className="nt-auth-showcase-footer"><span>✳</span> EAT WELL. FEEL WELL. LIVE WELL.</div>
+          </section>
+
+          <section className="nt-auth-form-panel">
+            <div className="nt-auth-mobile-brand">
+              <span className="nt-auth-logo">N<span>+</span></span>
+              <b>NUTRITRACK</b>
+            </div>
+
+            <div className="nt-auth-form-container">
+              <div className="nt-auth-form-heading">
+                <span className="nt-auth-eyebrow">{authMode === "register" ? "START YOUR JOURNEY" : "WELCOME BACK"}</span>
+                <h2>{authMode === "register" ? "Create your account." : "Welcome back."}</h2>
+                <p>{authMode === "register" ? "Your healthier habits start with one small step." : "Ready to continue your nutrition journey?"}</p>
+              </div>
+
+              <div className="nt-auth-tabs">
+                <button type="button" className={authMode === "login" ? "active" : ""} onClick={() => { setAuthMode("login"); setError(""); setMessage(""); }}>Log in</button>
+                <button type="button" className={authMode === "register" ? "active" : ""} onClick={() => { setAuthMode("register"); setError(""); setMessage(""); }}>Create account</button>
+              </div>
+
+              {error && <div className="nt-auth-notice error" role="alert"><span>!</span><p>{error}</p></div>}
+              {message && <div className="nt-auth-notice success" role="status"><span>✓</span><p>{message}</p></div>}
+
+              <form className="nt-auth-form" onSubmit={submitAuth}>
+                {authMode === "register" && (
+                  <label>Full name
+                    <input type="text" placeholder="Enter your full name" value={authForm.name} onChange={(e) => updateAuthForm("name", e.target.value)} required autoComplete="name" />
+                  </label>
+                )}
+
+                <label>Email address
+                  <input type="email" placeholder="you@example.com" value={authForm.email} onChange={(e) => updateAuthForm("email", e.target.value)} required autoComplete="email" />
+                </label>
+
+                <label>Password
+                  <input type="password" placeholder="Enter your password" value={authForm.password} onChange={(e) => updateAuthForm("password", e.target.value)} required minLength="6" autoComplete={authMode === "register" ? "new-password" : "current-password"} />
+                </label>
+
+                {authMode === "register" && (
+                  <div className="nt-auth-register-grid">
+                    <label>Age
+                      <input type="number" min="1" max="119" value={authForm.age} onChange={(e) => updateAuthForm("age", e.target.value)} required />
+                    </label>
+                    <label>Gender
+                      <select value={authForm.gender} onChange={(e) => updateAuthForm("gender", e.target.value)}><option value="male">Male</option><option value="female">Female</option></select>
+                    </label>
+                    <label>Weight (kg)
+                      <input type="number" min="1" max="499" step="0.1" value={authForm.weight} onChange={(e) => updateAuthForm("weight", e.target.value)} required />
+                    </label>
+                    <label>Height (cm)
+                      <input type="number" min="1" max="299" step="0.1" value={authForm.height} onChange={(e) => updateAuthForm("height", e.target.value)} required />
+                    </label>
+                    <label className="nt-auth-full">Activity level
+                      <select value={authForm.activity_level} onChange={(e) => updateAuthForm("activity_level", e.target.value)}>
+                        <option value="sedentary">Sedentary</option><option value="light">Light</option><option value="moderate">Moderate</option><option value="active">Active</option><option value="very active">Very active</option>
+                      </select>
+                    </label>
+                  </div>
+                )}
+
+                <button className="nt-auth-submit" type="submit" disabled={authLoading}>
+                  {authLoading ? "Please wait..." : authMode === "register" ? "Create my account ↗" : "Log in to NutriTrack ↗"}
+                </button>
+              </form>
+
+              <div className="nt-auth-security"><span>⌑</span>Your nutrition data is securely linked to your account.</div>
+            </div>
+
+            <div className="nt-auth-bottom">© {new Date().getFullYear()} NutriTrack · Your daily nutrition companion</div>
+          </section>
         </div>
       </div>
     );
