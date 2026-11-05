@@ -2,6 +2,27 @@
 import { useCallback, useEffect, useState } from "react";
 import "./App.css";
 
+// Keep existing users signed in when upgrading from sessionStorage to localStorage.
+function migrateNutriTrackSession() {
+  try {
+    const keys = ["nutritrack_token", "nutritrack_user"];
+
+    keys.forEach((key) => {
+      if (!localStorage.getItem(key)) {
+        const oldValue = sessionStorage.getItem(key);
+        if (oldValue) localStorage.setItem(key, oldValue);
+      }
+    });
+
+    keys.forEach((key) => sessionStorage.removeItem(key));
+  } catch (error) {
+    console.warn("Could not migrate the previous NutriTrack session:", error);
+  }
+}
+
+migrateNutriTrackSession();
+
+
 const API_URL = import.meta.env.VITE_API_URL || "https://nutritrack-backend-qsoc.onrender.com";
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
@@ -18,7 +39,7 @@ const DEFAULT_PROFILE = {
 
 async function api(path, options = {}) {
   const headers = { ...options.headers };
-  const token = sessionStorage.getItem("nutritrack_token");
+  const token = localStorage.getItem("nutritrack_token");
   if (token) headers.Authorization = `Bearer ${token}`;
 
   if (options.body && !(options.body instanceof FormData)) {
@@ -156,7 +177,7 @@ function removeDuplicateFoods(items) {
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
-      return JSON.parse(sessionStorage.getItem("nutritrack_user") || "null");
+      return JSON.parse(localStorage.getItem("nutritrack_user") || "null");
     } catch {
       return null;
     }
@@ -250,7 +271,7 @@ function App() {
   }, [currentUser?.id]);
 
   useEffect(() => {
-    if (currentUser?.id && sessionStorage.getItem("nutritrack_token")) {
+    if (currentUser?.id && localStorage.getItem("nutritrack_token")) {
       loadDashboard();
       loadProfile();
     } else {
@@ -300,8 +321,8 @@ function App() {
         throw new Error("The server did not return a valid login session.");
       }
 
-      sessionStorage.setItem("nutritrack_token", result.access_token);
-      sessionStorage.setItem("nutritrack_user", JSON.stringify(result.user));
+      localStorage.setItem("nutritrack_token", result.access_token);
+      localStorage.setItem("nutritrack_user", JSON.stringify(result.user));
       setCurrentUser(result.user);
       setDashboard(null);
       setLogs([]);
@@ -317,8 +338,8 @@ function App() {
   }
 
   function logout() {
-    sessionStorage.removeItem("nutritrack_token");
-    sessionStorage.removeItem("nutritrack_user");
+    localStorage.removeItem("nutritrack_token");
+    localStorage.removeItem("nutritrack_user");
     setCurrentUser(null);
     setDashboard(null);
     setLogs([]);
