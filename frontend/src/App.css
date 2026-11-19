@@ -200,3 +200,51 @@ img { max-width:100%; }
   .nt-auth-form-heading h2 { font-size:28px; }
 }
 
+
+
+/* NutriTrack premium UX refinement */
+.nt-card-heading { justify-content:flex-start; }
+.nt-card-icon { display:none !important; }
+.nt-mobile-nav { display:none; }
+@media(max-width:800px) {
+  .nt-mobile-nav { position:fixed; right:0; bottom:0; left:0; z-index:100; display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); align-items:end; min-height:68px; padding:8px 10px calc(8px + env(safe-area-inset-bottom)); border-top:1px solid rgba(190,215,177,.16); background:rgba(10,20,14,.96); backdrop-filter:blur(20px); box-shadow:0 -12px 35px rgba(0,0,0,.22); }
+  .nt-mobile-nav a,.nt-mobile-nav button { display:flex; align-items:center; justify-content:center; flex-direction:column; gap:5px; min-width:0; min-height:49px; padding:2px 0; border:0; background:transparent; color:#93a493; text-decoration:none; -webkit-tap-highlight-color:transparent; }
+  .nt-mobile-nav a svg,.nt-mobile-nav button svg { width:21px; height:21px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .nt-mobile-nav small { color:inherit; font-size:9px; font-weight:700; letter-spacing:.1px; }
+  .nt-mobile-nav a:focus-visible,.nt-mobile-nav button:focus-visible { outline:2px solid var(--nt-lime); outline-offset:3px; border-radius:9px; }
+  .nt-mobile-nav .nt-mobile-scan { color:var(--nt-lime); }
+  .nt-mobile-nav .nt-mobile-scan span { display:grid; place-items:center; width:43px; height:43px; margin-top:-21px; border:4px solid var(--nt-bg); border-radius:15px; background:var(--nt-lime); color:#172414; box-shadow:0 5px 18px rgba(201,243,107,.2); }
+  .nt-mobile-nav .nt-mobile-scan svg { width:22px; height:22px; }
+  .nt-app { padding-bottom:calc(82px + env(safe-area-inset-bottom)); }
+  .nt-main { padding-bottom:8px; }
+}
+.nt-scan-details { display:grid; gap:12px; margin-top:14px; padding:14px; border:1px solid var(--nt-border); border-radius:12px; background:rgba(12,22,15,.55); }
+.nt-scan-details-heading { display:flex; flex-direction:column; gap:5px; }
+.nt-scan-details-heading b { color:var(--nt-text); font-size:12px; }
+.nt-scan-details-heading small { color:var(--nt-muted); font-size:10px; line-height:1.5; }
+.nt-scan-details label { display:flex; flex-direction:column; gap:6px; min-width:0; color:#c4d2bf; font-size:10px; font-weight:700; }
+.nt-scan-details input,.nt-scan-details select { width:100%; min-width:0; min-height:42px; padding:10px 11px; border:1px solid var(--nt-border); border-radius:9px; outline:none; background:#111b14; color:var(--nt-text); font:inherit; font-size:12px; }
+.nt-scan-details input:focus,.nt-scan-details select:focus { border-color:var(--nt-lime); box-shadow:0 0 0 3px rgba(201,243,107,.09); }
+.nt-scan-fields-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:11px; }
+.nt-scan-analyse-button { min-height:45px; border:0; border-radius:10px; background:var(--nt-lime); color:#182515; font-size:11px; font-weight:900; cursor:pointer; }
+.nt-scan-analyse-button:disabled { opacity:.6; cursor:wait; }
+.nt-photo-preview>div { flex:1; }
+.nt-photo-preview .nt-secondary-button { align-self:flex-start; padding:7px 9px; border:1px solid var(--nt-border); border-radius:8px; background:#27352a; color:#c5d1bf; font-size:9px; }
+@media(max-width:560px) {
+  .nt-main { width: min(100% - 30px, 620px); }
+  .nt-overview-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .nt-calorie-card { grid-column:1/-1; padding:19px 17px; }
+  .nt-calorie-main { flex-wrap:wrap; gap:6px 9px; }
+  .nt-calorie-main strong { font-size:clamp(38px,11vw,48px); }
+  .nt-calorie-footer { justify-content:space-between; gap:12px; }
+  .nt-summary-card { min-height:145px; }
+  .nt-scan-fields-grid { grid-template-columns:1fr; }
+  .nt-scanner-heading { flex-wrap:wrap; }
+  .nt-upload-area { gap:10px; }
+  .nt-photo-preview { align-items:flex-start; }
+  .nt-photo-preview img { width:76px; height:76px; flex-shrink:0; }
+}
+@media(max-width:360px) { .nt-mobile-nav { padding-right:5px; padding-left:5px; }.nt-mobile-nav small { font-size:8px; }.nt-summary-card { padding:12px; } }
+
+.nt-ai-confidence { margin:8px 0; color:#b8d98d; font-size:10px; }
+.nt-ai-confidence b { color:var(--nt-lime); }

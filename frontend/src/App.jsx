@@ -212,6 +212,7 @@ function App() {
   const [preview, setPreview] = useState("");
   const [analysing, setAnalysing] = useState(false);
   const [photoExpanded, setPhotoExpanded] = useState(false);
+  const [scanDetails, setScanDetails] = useState({ food_name: "", portion_size: "1 serving", quantity: "1", cooking_method: "", ingredients: "" });
 
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -628,6 +629,11 @@ function App() {
     try {
       const formData = new FormData();
       formData.append("image", photo);
+      formData.append("food_name", scanDetails.food_name);
+      formData.append("portion_size", scanDetails.portion_size);
+      formData.append("quantity", scanDetails.quantity);
+      formData.append("cooking_method", scanDetails.cooking_method);
+      formData.append("ingredients", scanDetails.ingredients);
 
       const result = await api("/ai/analyze-food", {
         method: "POST",
@@ -916,7 +922,7 @@ function App() {
 
         <section className="nt-overview-grid" aria-label="Daily calorie overview">
           <article className="nt-calorie-card">
-            <div className="nt-card-heading"><div><span className="nt-card-label">DAILY CALORIE INTAKE</span><h2>Your energy today</h2></div><span className="nt-card-icon">✳</span></div>
+            <div className="nt-card-heading"><div><span className="nt-card-label">DAILY CALORIE INTAKE</span><h2>Your energy today</h2></div></div>
             <div className="nt-calorie-main"><strong>{loading ? "…" : formatNumber(consumed)}</strong><span>kcal consumed</span></div>
             <div className="nt-progress-track"><span style={{ width: `${progressWidth}%` }} /></div>
             <div className="nt-progress-meta"><span>{Math.round(percent)}% of daily target</span><b>{formatNumber(goal)} kcal goal</b></div>
@@ -946,12 +952,23 @@ function App() {
                 <div className="nt-scanner-heading"><span className="nt-scanner-icon">✧</span><div><b>AI photo scanner</b><small>Turn a meal photo into a nutrition estimate</small></div><button type="button" onClick={() => setPhotoExpanded(value => !value)}>{photoExpanded ? "Hide" : "Open scanner"} {photoExpanded ? "−" : "+"}</button></div>
                 {photoExpanded && <div className="nt-scanner-content">
                   <div className="nt-upload-area"><div className="nt-upload-symbol">▧</div><div><b>Upload your meal photo</b><p>Choose a clear JPG, PNG or WEBP image. Maximum 10 MB.</p></div><label className="nt-upload-button">Choose image<input type="file" accept="image/jpeg,image/png,image/webp" onChange={selectPhoto} disabled={analysing || saving}/></label></div>
-                  {preview && <div className="nt-photo-preview"><img src={preview} alt="Selected food"/><div><b>{photo?.name || "Selected food"}</b><small>{photo ? (photo.size / 1024 / 1024).toFixed(2) : "0"} MB</small><div className="nt-photo-buttons"><button type="button" onClick={analysePhoto} disabled={analysing || saving}>{analysing ? "Analysing…" : "Analyse with AI"}</button><button type="button" className="nt-secondary-button" onClick={clearPhoto} disabled={analysing || saving}>Remove</button></div></div></div>}
+                  {preview && <div className="nt-photo-preview"><img src={preview} alt="Selected food"/><div><b>{photo?.name || "Selected food"}</b><small>{photo ? (photo.size / 1024 / 1024).toFixed(2) : "0"} MB</small><button type="button" className="nt-secondary-button" onClick={clearPhoto} disabled={analysing || saving}>Remove photo</button></div></div>}
+                  <div className="nt-scan-details">
+                    <div className="nt-scan-details-heading"><b>Food details</b><small>More details help AI estimate your meal more accurately.</small></div>
+                    <label>Food name (optional)<input value={scanDetails.food_name} onChange={e => setScanDetails(v => ({...v, food_name:e.target.value}))} placeholder="e.g. Nasi lemak with fried chicken" /></label>
+                    <div className="nt-scan-fields-grid">
+                      <label>Portion size<input value={scanDetails.portion_size} onChange={e => setScanDetails(v => ({...v, portion_size:e.target.value}))} placeholder="e.g. 1 medium plate" /></label>
+                      <label>Quantity<input type="number" min="0.1" max="20" step="0.1" value={scanDetails.quantity} onChange={e => setScanDetails(v => ({...v, quantity:e.target.value}))} /></label>
+                      <label>Cooking method<select value={scanDetails.cooking_method} onChange={e => setScanDetails(v => ({...v, cooking_method:e.target.value}))}><option value="">Not sure / mixed</option><option>Fried</option><option>Deep-fried</option><option>Grilled</option><option>Boiled</option><option>Steamed</option><option>Roasted</option><option>Stir-fried</option><option>Baked</option></select></label>
+                      <label>Ingredients / extras<input value={scanDetails.ingredients} onChange={e => setScanDetails(v => ({...v, ingredients:e.target.value}))} placeholder="e.g. sambal, egg, peanuts, gravy, oil" /></label>
+                    </div>
+                    {preview && <button type="button" className="nt-scan-analyse-button" onClick={analysePhoto} disabled={analysing || saving}>{analysing ? "Analysing your meal…" : "Analyse food with AI"}</button>}
+                  </div>
                   {analysing && <div className="nt-inline-loading"><span className="nt-spinner"/>Gemini is analysing your food photo…</div>}
                 </div>}
               </div>
 
-              {selected && <div className="nt-selected-food"><div className="nt-selected-heading"><span>{foodEmoji(selected.name)}</span><div><small>REVIEW NUTRITION ESTIMATE</small><h3>{selected.name}</h3><p>{selected.serving_size}</p></div></div><div className="nt-macro-grid"><div><small>CALORIES</small><b>{formatNumber(selected.calories)} kcal</b></div><div><small>PROTEIN</small><b>{selected.protein} g</b></div><div><small>CARBS</small><b>{selected.carbohydrates} g</b></div><div><small>FAT</small><b>{selected.fat} g</b></div></div>{selected.disclaimer && <p className="nt-disclaimer">{selected.disclaimer}</p>}<div className="nt-add-controls"><label>Meal<select value={meal} onChange={event => setMeal(event.target.value)}>{MEALS.map(item => <option value={item} key={item}>{item.charAt(0).toUpperCase() + item.slice(1)}</option>)}</select></label><label>Quantity<input type="number" min="0.1" max="100" step="0.5" value={quantity} onChange={event => setQuantity(event.target.value)}/></label><button type="button" onClick={() => addToDiary()} disabled={saving || analysing}>{saving ? "Adding…" : "Add to diary ↗"}</button><button type="button" className="nt-secondary-button" onClick={() => setSelected(null)} disabled={saving}>Cancel</button></div></div>}
+              {selected && <div className="nt-selected-food"><div className="nt-selected-heading"><span>{foodEmoji(selected.name)}</span><div><small>REVIEW NUTRITION ESTIMATE</small><h3>{selected.name}</h3><p>{selected.serving_size}</p></div></div><div className="nt-macro-grid"><div><small>CALORIES</small><b>{formatNumber(selected.calories)} kcal</b></div><div><small>PROTEIN</small><b>{selected.protein} g</b></div><div><small>CARBS</small><b>{selected.carbohydrates} g</b></div><div><small>FAT</small><b>{selected.fat} g</b></div></div>{selected.confidence != null && <p className="nt-ai-confidence">AI confidence estimate: <b>{Math.round(Number(selected.confidence) <= 1 ? Number(selected.confidence) * 100 : Number(selected.confidence))}%</b></p>}{selected.disclaimer && <p className="nt-disclaimer">{selected.disclaimer}</p>}<div className="nt-add-controls"><label>Meal<select value={meal} onChange={event => setMeal(event.target.value)}>{MEALS.map(item => <option value={item} key={item}>{item.charAt(0).toUpperCase() + item.slice(1)}</option>)}</select></label><label>Quantity<input type="number" min="0.1" max="100" step="0.5" value={quantity} onChange={event => setQuantity(event.target.value)}/></label><button type="button" onClick={() => addToDiary()} disabled={saving || analysing}>{saving ? "Adding…" : "Add to diary ↗"}</button><button type="button" className="nt-secondary-button" onClick={() => setSelected(null)} disabled={saving}>Cancel</button></div></div>}
             </section>
 
             <section className="nt-panel" id="diary">
@@ -981,7 +998,13 @@ function App() {
         <footer className="nt-footer"><a className="nt-brand" href="#home"><span className="nt-brand-mark">N<span>+</span></span><span className="nt-brand-copy">NUTRITRACK<small>YOUR DAILY NUTRITION</small></span></a><span>Eat well. Feel well. Live well.</span><a href="#home">Back to top ↑</a></footer>
       </main>
 
-      <nav className="nt-mobile-nav" aria-label="Mobile navigation"><a href="#home"><span>⌂</span><small>Home</small></a><a href="#food-search"><span>⌕</span><small>Search</small></a><button type="button" onClick={() => { setPhotoExpanded(true); document.getElementById("food-search")?.scrollIntoView({ behavior: "smooth" }); }}><span>✧</span><small>Scan</small></button><a href="#diary"><span>▤</span><small>Diary</small></a><a href="#profile"><span>◎</span><small>Goals</small></a></nav>
+      <nav className="nt-mobile-nav" aria-label="Mobile navigation">
+        <a href="#home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg><small>Home</small></a>
+        <a href="#food-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg><small>Search</small></a>
+        <button className="nt-mobile-scan" type="button" onClick={() => { setPhotoExpanded(true); document.getElementById("food-search")?.scrollIntoView({ behavior: "smooth" }); }}><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M8 9h8v6H8z"/></svg></span><small>Scan</small></button>
+        <a href="#diary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12a2 2 0 0 1 2 2v16H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z"/><path d="M7 3v18M11 8h5M11 12h5M11 16h3"/></svg><small>Diary</small></a>
+        <a href="#profile"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg><small>Goals</small></a>
+      </nav>
     </div>
   );
 }
